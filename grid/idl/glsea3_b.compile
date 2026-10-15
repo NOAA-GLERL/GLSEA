@@ -1,0 +1,4 @@
+.compile  glsea3_b.pro
+resolve_all
+save,/routines,filename='glsea3_b.sav'
+exit

@@ -1,0 +1,571 @@
+#include <stdio.h>
+#include <stdint.h> // Include the header for standard integer types
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <ctype.h>
+#include <math.h>
+#include <time.h>
+
+#include <limits.h>
+#include <unistd.h>
+
+#include <xtiffio.h>
+#include <geotiffio.h>
+#include "cproj.h"
+
+ 
+
+//#if !defined Bool
+//    enum { false=0, true } typedef Bool;
+////#endif
+
+#define TIME_STR_LENGTH  20          // YYYY:MM:DD HH:MM:SS
+
+#define MAX_FILE_NAME    128
+#define FNAME_LEN        27           /* 2003_091_1759_n16_gs_c5.raw */
+     
+#define SIZE_1024        1024
+#define COLOR_NUM        128
+
+#define MAXCOLORS        256
+ 
+#define TIFF_EXT         "tif"
+#define HEAD_EXT         "hrd"
+
+#define COLOR_PAL       "/home/cw/opr/glsea2/bkg/composit.pal"
+
+int writeImageIntoTif(TIFF * fh_tif, void *img );
+int getColor(char exeFn[], uint16_t r[], uint16_t g[], uint16_t b[]);
+uint16_t byte_scale(float, float, float, uint16_t );
+int calibrate(float *, unsigned char * );
+  
+
+int main( int argc, char *argv[] ) {
+
+   struct tm *tmPt;
+   char timeBuf[TIME_STR_LENGTH];
+   char *tmResult;
+   time_t curTime;
+   
+   int rows, cols, i, j, pathLen, len;
+   char projcit[80];
+   char GTcitation[80];
+   char PCScitation[9];
+
+
+   short modeltype,proj;
+   
+   double projlong,projlat;
+   double transformation[16] = {1800,0,0,-10288921.955,-0,-1800,0,6520074.158,0,0,0,0,0,0,0,1};
+ 
+   TIFF *fh_tif;
+   GTIF *gtif=(GTIF*)0;
+    
+   int rc;
+   unsigned char *outline;
+   uint32_t rowsperstrip;
+
+////////   int ptype = MERCATOR;
+   
+   uint16_t r[256], g[256], b[256];
+ 
+   FILE *fp_hrd, *fp2;  
+ 
+
+   unsigned char * img = NULL;
+ 
+   float * imgPt = NULL;
+   float * fltImg = NULL;
+
+//   short int * img1024 = NULL;
+ 
+   size_t num_read;
+   float fltImgSize;
+   int imgSize;
+   
+
+   char *line = NULL;
+
+   char ext[] = TIFF_EXT;
+//   char hrd[] = HEAD_EXT;
+   char rawFn[MAX_FILE_NAME] = ""; 
+   char tifFn[MAX_FILE_NAME] = ""; 
+//   char hrdFn[MAX_FILE_NAME] = ""; 
+   
+   double xSize, ySize;
+      
+   char * chPos=NULL;
+   const char slashCh = '/';
+   
+   char valueName[20];
+   int nCols, nRows, cellSize;
+   double xLowLeft, yLowLeft;
+   float noData;
+   
+//strcpy( rawFn,"2002_247_1955_n16_gl_c1.raw");
+//strcpy( rawFn,"2002_247_1955_n16_gr_c1.raw");
+//strcpy( rawFn,"2002_247_1955_n16_gl_d1.raw");
+//strcpy( rawFn,"2002_247_1955_n16_gr_d1.raw");
+   
+ 
+   if (argc < 2) {
+      printf("Useage: %s  datafile \n", argv[0]);
+      exit(0);
+   }   
+//ncols         1024   
+   strcpy(rawFn, argv[1]);  
+   
+   printf("Processing: %s\n",rawFn);
+   
+   chPos = strrchr(rawFn, slashCh);
+
+   if (chPos != NULL) {
+      printf("%s\n", chPos+1);
+      strncpy(tifFn, chPos+1, 15);
+   } 
+   else {
+      strcpy(tifFn, rawFn);
+   }
+
+   
+   strcat(tifFn, ext);
+    
+     
+   printf("Creating %s\n",tifFn);
+
+   if ((fp2 = fopen( rawFn, "r")) == NULL){
+        printf("Error open %s\n", rawFn );   
+        exit(0);
+   }
+    
+
+         rows = 1024;
+         cols = 1024;
+    printf("size of float %d\n", sizeof(float));
+         imgSize = rows *4 * cols * 4;        
+
+         if ( (imgPt =  malloc (imgSize*2)) != NULL )  {
+          
+              
+              fscanf(fp2, "%s %d", valueName, &nCols);
+             // printf("%s\n", valueName);
+             // printf("%d\n", nCols);
+
+              fscanf(fp2, "%s %d", valueName, &nRows);
+             // printf("%s\n", valueName);
+             // printf("%d\n", nRows);
+
+             fscanf(fp2, "%s %lf", valueName, &xLowLeft);
+             // printf("%s\n", valueName);
+             // printf("%16.3lf\n", xLowLeft);
+
+              fscanf(fp2, "%s %lf", valueName, &yLowLeft);
+             // printf("%s\n", valueName);
+             // printf("%16.3lf\n", yLowLeft);
+     
+              fscanf(fp2, "%s %d", valueName, &cellSize);
+            //  printf("%s\n", valueName);
+            //  printf("%d\n", cellSize);
+
+              fscanf(fp2, "%s %f", valueName, &noData);
+            //  printf("%s\n", valueName);
+           //   printf("%10.2f\n", noData);
+ 
+          ///    num_read = fread ( (float *)fltImg, 1, imgSize*2, fp2);
+ fltImg = imgPt;
+
+
+ float f1,f2,f3;
+ int n;
+ n = fscanf(fp2, "%f %f %f", &f1, &f2, &f3);
+ printf("%f %f %f\n", &f1, &f2, &f3);
+ printf("liu\n");
+ printf("%d \n", n);
+            for (i=0; i<SIZE_1024; i++)  
+               for (j=0; j<SIZE_1024; j++)  
+                  fscanf(fp2, "%f", imgPt++);
+ 		 
+
+         }
+         else {
+             printf("Error allocate memory \n" );
+             exit(0); 
+         }           
+ 
+      getColor( COLOR_PAL, r,g,b);
+
+                        /* scale color map rgb values (0,65535) */
+      for (i=0; i<MAXCOLORS; i++){
+           // printf("\nBefore i-%i r%i,g%i,b%i\n", i, r[i], g[i], b[i] );
+         r[i] = byte_scale( r[i], 0, 255, 65535);
+         g[i] = byte_scale( g[i], 0, 255, 65535);
+         b[i] = byte_scale( b[i], 0, 255, 65535);
+          //printf("After i-%i r%i,g%i,b%i\n\n", i, r[i], g[i], b[i] );
+      }
+   
+
+ printf("%s\n", tifFn);    
+   projlong=0.0;
+   projlat=0.0;
+    
+    
+/* Set the GeoTiFF Projection Codes Mercator = 7*/
+  
+////   strcpy(projcit,"Projection = CT_Mercator Units=Meters");
+   strcpy(GTcitation, "US Geological Survey (USGS) General Cartographic Transformations Package (GCTP)");
+   proj=7;
+   modeltype=1;
+
+   strcpy(PCScitation, "Mercator");
+        
+ //   fprintf (stderr, "cwftoarc: ** NOTE: ArcView Standard Projection **\n");
+ //   fprintf (stderr, "             Category: Projections of the World\n");
+  //  fprintf (stderr, "             Type: Mercator\n");
+  //  fprintf (stderr, "             Spheroid: Sphere\n");
+ //   fprintf (stderr, "             Latitude of True Scale: 0\n");
+ //   fprintf (stderr, "             Central Meridian: 0\n");     
+
+
+/*create tiff file and define basic tiff tags*/
+   
+   if ((fh_tif = (TIFF *) XTIFFOpen(tifFn, "w")) == 0) {
+     printf("Error open %s file\n", tifFn);
+     exit(0);
+   }  
+
+printf("%s\n", tifFn);
+/* Open GeoTIFF Parser */   
+   
+   gtif = GTIFNew(fh_tif);
+   
+   rc = TIFFSetField(fh_tif, TIFFTAG_ARTIST, "NOAA CoastWatch Great Lakes Node"); 
+
+   (void) time(&curTime);
+   tmPt = localtime(&curTime);
+   strftime(timeBuf, TIME_STR_LENGTH, "%Y:%m:%d %H:%M:%S", tmPt);
+   rc = TIFFSetField(fh_tif, TIFFTAG_DATETIME, timeBuf); 
+   
+   rc = TIFFSetField(fh_tif, TIFFTAG_IMAGEDESCRIPTION, "temperature = (color_index * 0.1255) - 2"); 
+  
+   rc = TIFFSetField(fh_tif, TIFFTAG_IMAGEWIDTH, cols); 
+   rc = TIFFSetField(fh_tif, TIFFTAG_IMAGELENGTH, rows); 
+   rc = TIFFSetField(fh_tif, TIFFTAG_BITSPERSAMPLE, 8); 
+//  rc = TIFFSetField(fh_tif, TIFFTAG_COMPRESSION, 32773); 
+   rc = TIFFSetField(fh_tif, TIFFTAG_COMPRESSION, 1);
+   
+   rc = TIFFSetField(fh_tif, TIFFTAG_PHOTOMETRIC, 3); 
+   rowsperstrip = TIFFDefaultStripSize(fh_tif, rowsperstrip);
+// printf("rowsperstrip =%d\n", rowsperstrip);
+   rc = TIFFSetField(fh_tif, TIFFTAG_ROWSPERSTRIP, rowsperstrip); 
+   rc = TIFFSetField(fh_tif, TIFFTAG_XRESOLUTION, 1); 
+   rc = TIFFSetField(fh_tif, TIFFTAG_YRESOLUTION, 1);  
+   rc = TIFFSetField(fh_tif, TIFFTAG_RESOLUTIONUNIT, 1); 
+   rc = TIFFSetField(fh_tif, TIFFTAG_COLORMAP, r, g, b); 
+   rc = TIFFSetField(fh_tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG); 
+   
+   TIFFSetField(fh_tif, TIFFTAG_GEOTRANSMATRIX, 16, transformation);
+                                       
+    /* GTModels
+        ModelTypeProjected =1
+        ModelTypeGeographic=2  */
+    
+   GTIFKeySet(gtif, GTModelTypeGeoKey, TYPE_SHORT, 1, (short)modeltype);
+    
+/* GTRasterTypeGeoKey for RasterPixelIsArea value = 1*/
+   GTIFKeySet(gtif, GTRasterTypeGeoKey, TYPE_SHORT,1, (short) 1);
+    
+   GTIFKeySet(gtif, GTCitationGeoKey, TYPE_ASCII,80, GTcitation);
+    
+   GTIFKeySet(gtif, GeographicTypeGeoKey, TYPE_SHORT,1,GCS_WGS_84);
+
+   GTIFKeySet(gtif, ProjectedCSTypeGeoKey,TYPE_SHORT,1, KvUserDefined);
+   GTIFKeySet(gtif, PCSCitationGeoKey, TYPE_ASCII, 80, PCScitation);
+
+
+
+   GTIFKeySet(gtif, ProjectionGeoKey,TYPE_SHORT,1,(short)KvUserDefined);
+   GTIFKeySet(gtif, ProjCoordTransGeoKey, TYPE_SHORT,1,(short)proj);
+   GTIFKeySet(gtif, ProjLinearUnitsGeoKey, TYPE_SHORT,1,(short)Linear_Meter);
+
+   GTIFKeySet(gtif, ProjNatOriginLongGeoKey, TYPE_DOUBLE,1,(double)projlong);
+   GTIFKeySet(gtif, ProjNatOriginLatGeoKey, TYPE_DOUBLE,1,(double)projlat);
+
+
+   GTIFKeySet(gtif, ProjFalseEastingGeoKey, TYPE_DOUBLE,1,(double)0.);
+   GTIFKeySet(gtif, ProjFalseNorthingGeoKey, TYPE_DOUBLE,1,(double)0.);
+
+          
+   GTIFWriteKeys(gtif);
+   GTIFFree(gtif);
+          
+
+  /*read data from cwf in memory, scale, and write to tiff*/    
+
+ 
+                
+
+      if ( (img = malloc (imgSize)) != NULL ) { 
+      
+            
+           calibrate(fltImg, img );
+  
+
+        if ( fltImg ) free(fltImg);
+        
+        
+        writeImageIntoTif ( fh_tif, img );
+      }
+      else {
+             printf("Error allocate memory \n" );
+             exit(0); 
+      }  
+ 
+        
+
+  
+//    fclose (ofp);
+
+  return 0;
+ }
+
+
+       
+/******************************************************************************/
+ 
+int writeImageIntoTif (TIFF * fh_tif, void *img ) {
+ 
+  int ioutbyte, rc, i, j;
+  int rows, cols;
+    
+  unsigned char * outline = NULL;    
+  unsigned char *img1024 = NULL;
+
+  rows = SIZE_1024;  
+  cols = SIZE_1024; 
+             
+  outline = (char *)_TIFFmalloc(cols * sizeof(char));
+     
+  if ( outline == NULL ) {
+     printf("Error allocate memory \n" );
+     exit(0); 
+  }
+
+  img1024 = img; 
+              
+  for (j=0; j<rows; j++){              
+     for (i=0; i<cols; i++){ 
+        
+        if ( *img1024 < 1 ) {
+           ioutbyte = 0;
+        }
+        else if ( *img1024 > 255 )  
+           ioutbyte = 255;
+        else {
+           ioutbyte = *img1024;                   
+        }
+                 
+        img1024++;
+                     
+        outline[i] = (char)  ioutbyte;
+    
+      }   //  end for 
+        
+         if ((rc = TIFFWriteScanline(fh_tif, outline, j, 0)) < 0)  
+                 printf ("Error writing data to %s\n",  fh_tif);
+ }
+//printf("%s\n", fh_tif);
+ XTIFFClose(fh_tif);   
+ 
+return 0;
+}  
+      
+/******************************************************************************/
+
+int getColor( char colorFn[], uint16_t red[], uint16_t green[], uint16_t blue[]) {
+
+  FILE *fp, *fp2;
+   
+  int i, j, k, nc, nt, n1;
+  unsigned char c;
+  float tMax, tMin, cMin, cMax, res, t1, t2;
+  char line[COLOR_NUM];
+  char rStr[COLOR_NUM], gStr[COLOR_NUM], bStr[COLOR_NUM];
+  char *strPt = line;
+  char workDir[PATH_MAX];
+ 
+//  clor table
+//  0   0   0   30   black
+//  70  70  70  29   light black
+//  110 110 110 27   dark gray    
+//  160 160 160 23   medium gray
+//  190 190 190 17   light gray
+//  220 220 220 11   off white
+         
+  if ( (fp = fopen(colorFn , "r")) == NULL ){
+        printf("Error open %s\n", colorFn  );   
+        exit(0);
+   }
+  
+    fgets(line, COLOR_NUM, fp);   // read out a head string in pal file
+ //   printf("%s\n", line);
+  
+  for ( i=0; i<256; i++ ) {
+    
+    fgets(line, COLOR_NUM, fp);
+      //   printf("%s\n", line);
+
+    strcpy(rStr, line);
+    rStr[2] = 0;
+    sscanf(rStr, "%x", &red[i]);
+        
+    strcpy(gStr, &line[2]);
+    gStr[2] = 0;
+    sscanf(gStr, "%x", &green[i]);
+
+    strcpy(bStr, &line[4]);
+    bStr[2] = 0;
+    sscanf(bStr, "%x", &blue[i]);
+
+   //printf("%d %d %d %d\n", i, red[i], green[i], blue[i]);
+  }
+            
+   fclose(fp);
+ 
+   sscanf("0", "%d", &red[30]  );   // black
+   sscanf("0", "%d", &green[30]);
+   sscanf("0", "%d", &blue[30] );  
+
+   sscanf("70", "%d", &red[29]  );   // light black
+   sscanf("70", "%d", &green[29]);
+   sscanf("70", "%d", &blue[29] );   
+
+   sscanf("110", "%d", &red[27]  );   // dark gray    
+   sscanf("110", "%d", &green[27]);
+   sscanf("110", "%d", &blue[27] );   
+
+   sscanf("160", "%d", &red[23]  );    
+   sscanf("160", "%d", &green[23]);
+   sscanf("160", "%d", &blue[23] );   
+
+   sscanf("190", "%d", &red[17]  );    
+   sscanf("190", "%d", &green[17]);
+   sscanf("190", "%d", &blue[17] );   
+
+   sscanf("220", "%d", &red[11]  );    
+   sscanf("220", "%d", &green[11]);
+   sscanf("220", "%d", &blue[11] );   
+
+// for ( i=0; i<256; i++ ) 
+//   printf("%d %d %d %d\n", i, red[i], green[i], blue[i]);
+ 
+   return 0;
+}
+       
+/**********************************************************************/
+
+unsigned short int byte_scale(float in_val, float mnval, float mxval, 
+                                          unsigned short int maxbyte) {
+float m,b,scaledin;
+unsigned short int  output;
+/*
+    m = (float) (maxbyte - 1) / (mxval - mnval);
+//printf("maxbyte = %i  max_val=%f  min_val=%f  m=%f \n",maxbyte,mxval,mnval,m);
+    b = (float) (maxbyte - 1) - (mxval * m);
+
+//printf("m=%f b=%f maxbyte=%f \n\n",m,b,maxbyte);
+
+    if (in_val < mnval)
+          in_val = mnval;
+    if (in_val > mxval)
+          in_val = mxval;
+
+      scaledin = (m * in_val) + b;
+*/
+scaledin = ( maxbyte / mxval )* in_val;      
+      output   = round (scaledin);
+
+/*  printf("inval=%f scaledin=%f outoput=%i\n", in_val, scaledin, output);*/
+ 
+  return (output);
+}
+
+
+/******************************************************************************/
+
+/* convert from float, then to 8 bits */
+
+//-----------------------------------------------------------------------------------
+//  Color               Median Ice                  Color               Median Ice
+//  index    SI Code   Concentration                index    SI Code    Concentration
+//-----------------------------------------------------------------------------------
+//   11          01          5                       24    68,70,77         70
+//   -------------------------
+//   12    02,10,11         10                       25          78         75
+//                                                   26    79,80,88         80
+//   13       12,15         15                       27          89         85
+//                                                   -------------------------
+//   14    13,20,22         20                       28       81,90         90
+//   15          23         25                       29          91         95
+//   16    24,30,33         30                       -------------------------
+//   17          34         35                       30       92,93        100
+//   -------------------------
+//   18    35,40,44         40                     11-12  Off-white
+//   19          45         45                     13-17  Light gray                   
+//   20    46,50,55         50                     18-23  Medium gray
+//   21          56         55                     24-27  Dark gray
+//   22    57,60,66         60                     28-29  Light Blak
+//   23          67         65                     30-30  Black
+//-----------------------------------------------------------------------------------
+
+
+int calibrate(float *fltImg, unsigned char *img8 ) {
+
+   int i, j, r1;
+ 
+   // in composit.pal, each color take 5 line, 30 * 5 = 150
+   // index under 50 is reserved
+ 
+   for (i=0; i<SIZE_1024; i++) {
+      for (j=0; j<SIZE_1024; j++) {
+
+         if ( *fltImg == 255.0 )                                 // land
+            *img8 = 255;
+         else {
+            
+             if ( (*fltImg >= 99.0) && (*fltImg <= 99.1) )  {    // ice
+               *fltImg = round((*fltImg - 99) * 1000);
+                         
+               if ( (*fltImg > 95) && (*fltImg <= 100) )  
+                  *img8 = 30;                                    // black
+             
+               if ( (*fltImg >= 90) && (*fltImg <= 95) ) 
+                 *img8 = 29;                                     // dark gray
+
+               if ( (*fltImg >= 70) && (*fltImg <= 85) )  
+                  *img8 = 27;                  
+
+               if ( (*fltImg >= 40) && (*fltImg <= 65) ) 
+                  *img8 = 23;
+          
+               if ( (*fltImg >= 10) && (*fltImg <= 35) )  
+                  *img8 = 17;
+
+               if ( *fltImg < 10 )  
+                  *img8 = 11;                                       // off-white
+            } 
+            else {                                                   // water
+               r1 = round(*fltImg /30. * 150);
+               *img8 = r1 + 50;
+               // printf("%d , %d , %f  %d\n", i, j, *fltImg, *img8);
+            }
+        }
+          // printf("%d , %d , %f  %d\n", i, j, *fltImg, *img8);
+          fltImg++;
+          img8++;
+       }
+   }     
+  
+  return 0;
+}
+

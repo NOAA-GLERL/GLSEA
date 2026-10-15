@@ -1,0 +1,15 @@
+field  1: year
+field  2: Julian day
+
+field  3: number of sst files used in interpolation
+field  4: number of pixels filled with interpolated sst data
+field  5: number of pixels which were smoothed at edges between
+          interpolated and projected values
+field  6: number of pixels filled with projected sst data
+ 
+field  7: lake average sst for Lake Superior
+field  8: lake average sst for Lake Michigan
+field  9: lake average sst for Lake Huron
+field 10: lake average sst for Lake St. Clair
+field 11: lake average sst for Lake Erie
+field 12: lake average sst for Lake Ontario

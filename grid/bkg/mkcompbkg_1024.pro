@@ -1,0 +1,463 @@
+pro drawRect, x1, x2, y1, y2, color
+ 
+ a = [x1,x2] 
+ 
+ for i = y1,y2 do begin
+   b = [i,i]
+   plots, a, b, /device, color=color 
+ endfor
+  
+ return
+end
+
+;--------------------------------------------------------------------------
+pro cwmap,ipx,jpx,lat,lon,conv
+;--------------------------------------------------------------------------
+; Subroutine cwmap: Return pixel location, given latitude and longitude, or
+;  latitude and longitude given pixel location within synoptic 1024x1024
+;  CoastWatch image. (Approximate WGS-84 Mercator Projection - DJS 2007)
+
+
+; Set conv to -1 for (lat, lon) to (ipx, jpx) conversion,
+; anything else for inverse
+
+slat  =  38.8744   ;  Southern latitude
+wlon  = -92.4106   ;  Western longitude
+elon  = -75.8690   ;  Eastern longitude
+
+f1 = 0.99664  ; N-S scale adjustment for WGS-84
+
+; Constants
+
+alon0 = -wlon
+a1    = 1023. / (!dtor * ( elon-wlon ) )
+y0    = a1 * alog(tan (!dtor * (45.0 + slat / 2.) ))
+
+; Calculate latitude and longitude if conv = -1, else calculate ipx and jpx
+
+if(conv eq -1) then begin
+ ipx=fix(a1*!dtor*(alon0-lon)+0.5)
+ jpx=fix(f1*(a1*alog(tan(!dtor*(45.+lat/2.)))-y0)+0.5)
+end else begin
+ lat = 2.0 * ((( atan ( exp ( (jpx/f1 + y0) / a1) )) / !dtor) - 45.0)
+ lon = -1.0*((ipx / (a1 * !dtor)) - alon0)
+end
+
+return
+end
+
+;---------------------------------------------------------------------------
+
+s_w_flag = 1                                ; 0 -- summer, 1 -- winter
+
+
+fname=['S01_','S02_', 'S06_','S07_']
+fx=['PB','WB','WB_A','WB_B','WB_C','ST','RD','RR','AB']
+fc=[1,6,6,6,6,5,3,4,2]
+cwmask_dir='/home/cw/opr/glsea2/bkg/' 
+
+;device,decomp=0,pseudo=8,retain=2
+
+img=bytarr(1024,1024)
+read_gif,'/home/cw/opr/glsea2/bkg/ice_land_mask_regional.gif',img,r,b,g
+
+!p.font=1	; use true type font
+	
+set_plot, 'Z'   
+;device, set_res=[1024, 1024], z_buf=0, SET_FONT='Courier Bold', /TT_FONT
+;device, set_res=[1024, 1024], z_buf=0, SET_FONT='Courier', /TT_FONT
+;device, set_res=[1024, 1024], z_buf=0, SET_FONT='Times', /TT_FONT
+device, set_res=[1024, 1024], z_buf=0, SET_FONT='Helvetica', /TT_FONT
+
+ 
+a=bytarr(1024,1024)
+openr,lun,cwmask_dir+'ice_land_mask_regional.byt',/ get_lun ; CoastWatch land mask
+readu,lun,a
+free_lun,lun
+ 
+water=where(a lt 100,nw)          ; Over-water points
+ 
+;openr,1,'composit.pal'
+openr,lun,'/home/cw/opr/glsea2/bkg/composit.pal',/get_lun
+
+a=' '
+b=bytarr(3,256)
+readf, lun,a,format='(a)' 
+readf, lun,b,format='(3z2.2)'
+free_lun, lun
+
+red=bytarr(256)                   ; Color map
+grn=bytarr(256)
+blu=bytarr(256)
+red(*)=b(0,*)
+grn(*)=b(1,*)
+blu(*)=b(2,*)
+
+
+;window,xs=1024,ys=1024,colors=256
+
+tvlct,b(0,*),b(1,*),b(2,*)
+
+;tvlct,200,200,200,254             ; Color 254 to gray
+tvlct,215,239,255,254             ; Color 254 to light blue
+
+a=bytarr(1024,1024)
+a(*,*)=255
+tv,a        ; write white background
+ 
+!p.color=253
+for j=0,3 do begin
+   fn=fname(j)
+
+   ; 1-6 is for water bodies, streams, roads, etc.
+
+   for i=0,0 do begin
+   !p.color=250+fc(i)
+       ;print, i, !p.color
+   f='/home/cw/opr/glsea2/bkg/grf/'+fn+fx(i)+'.GRF'
+   print, f
+   openr, lun, f, /get_lun
+   z=bytarr(20)
+  on_ioerror,endloop
+  loop1:
+   readu,lun,z
+
+   n=fix(string(z(9:14)))
+   id=fix(string(z(7:8)))
+   zz=bytarr(20,n)
+   readu, lun,zz
+
+   ; state and national boundaries gray
+   if(i eq 0 and id lt 9) then !p.color=254
+
+   ; counties red
+   ;if(i eq 0 and id ge 9 and id le 10) then !p.color=253
+   ; other boundaries yellow
+   ;if(i eq 0 and id gt 10) then !p.color=254
+   ; check for permanent water bodies
+   if((i eq 1 or i eq 2 or i eq 3) and id gt 21) then goto,loop1
+
+   ; plot state and national boundaries only
+   if(i ne 0 or id ge 9) then goto,loop1
+
+   latd=fix(string(zz(0:1,*)))
+   latm=fix(string(zz(2:3,*)))
+   lats=fix(string(zz(4:5,*)))
+   lond=fix(string(zz(7:9,*)))
+   lonm=fix(string(zz(10:11,*)))
+   lons=fix(string(zz(12:13,*)))
+   lat=latd+latm/60.+lats/3600.
+   lon=lond+lonm/60.+lons/3600.
+   cwmap,ipx,jpx,lat,lon,-1
+   plots,ipx,jpx,/dev        ; state draw boundaries
+   goto,loop1
+ endloop:
+  free_lun,lun
+ endfor
+endfor
+ 
+
+a=tvrd(0,0,1024,1024)
+ 
+; Latitude/Longitude grid
+
+igrdcolr = 254     ; light blue 
+igrdstep = 10
+igrdincr = 5
+  
+for i=160,800,igrdstep do begin
+  for lon=78, 90, 2 do begin   ; draw lon line for 78 to 90 degrees
+    cwmap,ipx,jpx,45,lon,-1    ; input lat and lon, output ipx and jpx
+    a(ipx,i:i+igrdincr)=igrdcolr   
+  end
+end
+
+for i=100,1023-igrdincr,igrdstep do begin
+   for lat=42, 48, 2 do begin   ; draw lat line for 42 to 48 degrees
+     cwmap,ipx,jpx,lat,84,-1    ; input lat and lon, output ipx and jpx
+     a(i:i+igrdincr,jpx)=igrdcolr  
+   end
+end
+
+tv, a
+
+; Temperature scale
+
+bar_w = 28
+bar_h = 420
+bar_x = 75
+bar_y = 135 
+
+d=bytarr(1,bar_h)
+d(0,*)=byte(5.*findgen(bar_h)/14.+50)
+d=rebin(d,bar_w,bar_h,/sample)	
+
+tv, d, bar_x, bar_y
+
+!p.color = 0   ; draw black
+!X.ticks = 0
+!X.minor = 0
+;!p.charthick=1.2   ; font will be darker
+!p.font = 0        ; vector font
+
+plots, [bar_x, bar_x+bar_w, bar_x+bar_w, bar_x, bar_x], $
+       [bar_y, bar_y, bar_y+bar_h, bar_y+bar_h, bar_y], /device 
+
+
+axis_arr = findgen(256)
+
+plot, axis_arr, /nodata, xrange=[0,1], yrange=[0,30],  $
+	   position=[bar_x, bar_y, bar_x+bar_w, bar_y+bar_h],   $
+	   /device, xstyle=4, ystyle=4, /noerase
+	   
+ ; Centigrade
+ x_aj = 10
+ y_aj = 15
+ axis, ticklen=-.3, yaxis=1, ystyle=1, yrange=[0,30],  $
+          /nodata, charsize=1.2 
+ xyouts, bar_x+bar_w+x_aj, bar_y+bar_h+y_aj, '!9%!XC', /device, $
+           charsize=1.2, align=0.0, font=0
+
+ ;Fahrenheit
+ axis, ticklen=-.3, yaxis=0, ystyle=1, yrange=[32,86], $
+           /nodata, charsize=1.2 
+ xyouts, bar_x-x_aj, bar_y+bar_h+y_aj, '!9%!XF', /device,  $
+          charsize=1.2, align=1.0, font=0
+  
+ 
+xyouts,0,605,'Water Temperature',/dev,size=1.6, font=0, charthick=1 
+  
+; Ice scale
+
+;tvlct, 180,180,180,4
+;tvlct, 120,120,120,5
+;tvlct, 60,60,60,6
+
+;tvlct, 220,220,220,11			; color for ice  scale
+;tvlct, 160,160,160,18
+;tvlct, 100,100,100,24
+  
+   tvlct, 220,220,220,11			; color for ice  scale
+
+   for i=12, 17 do begin
+      tvlct, 190,190,190, i
+   end
+
+   for i=18, 23 do begin			
+      tvlct, 160,160,160, i
+   end
+ 
+   for i=24, 27 do begin
+      tvlct, 110,110,110, i
+   end
+
+   for i=28, 29 do begin
+      tvlct, 70,70,70, i
+   end
+
+   tvlct, 0,0,0,30
+
+; draw ice color mark
+
+if ( s_w_flag eq 1 ) then begin                          ;********winter
+
+   b_x1 = 816
+   b_y1 = 497
+   b_x2 = b_x1 + 20
+   b_y2 = b_y1 + 10
+
+   drawRect, b_x1, b_x2, b_y1+125,b_y2+125,11
+   drawRect, b_x1, b_x2, b_y1+100,b_y2+100,12
+   drawRect, b_x1, b_x2, b_y1+75, b_y2+75, 18
+   drawRect, b_x1, b_x2, b_y1+50, b_y2+50, 24
+   drawRect, b_x1, b_x2, b_y1+25, b_y2+25, 28
+   drawRect, b_x1, b_x2, b_y1,    b_y2,    30
+endif
+
+; Hard copy borders on rows 108 and 910
+
+plots, [0, 1023], [910, 910], /device, color=0
+plots, [0, 1023], [108, 108], /device, color=0
+
+
+circ_logo=bytarr(74,73)
+;read_gif,'noaa_logo_glsea.gif',circ_logo,r,b,g
+read_gif,'/home/cw/opr/glsea2/bkg/noaa_logo_glsea.gif',circ_logo,r,b,g
+tv,circ_logo,15,800
+
+
+
+;tv,a
+tvlct,  0, 71,153,1
+tvlct,  0,189,236,2
+tvlct,255,255,255,3
+;tv,circ_logo,15,780
+
+!p.color=0
+!p.font=1   ; true font
+!p.charthick=0.5   ; font will be darker
+
+; Save numeric characters along top of plot
+
+for i=0,9 do begin
+ xyouts,20+20*i,960,string(i,format='(i1)'),/dev,size=1.2 
+end
+
+; Plot headings
+
+;xyouts,494,840,'Analysis Date:  JD 230  08/18/2006',/device, size=2.4
+;xyouts,424,810,'Percent Pixels with Data within +/-10 Days: 99.9%',/device, size=2.4
+;xyouts,494,840,'Analysis Date:  JD',/device, size=2.4
+;xyouts,414,810,'Percent Pixels with Data within +/-10 Days:',/device, size=2.4
+
+;if ( s_w_flag eq 1 ) then begin                          ;********winter
+;   xyouts, 512, 776, 'Date of last ice analysis:',/device, size=2.4      	 
+;endif   
+
+!p.color=1
+xyouts,512,880,'GREAT LAKES SURFACE ENVIRONMENTAL ANALYSIS (GLSEA)', $
+       /device, size=2.5, align=0.5
+xyouts,380,160,'Great Lakes Environmental Research Laboratory', $
+       /device, size=2.0, align=0.0
+       
+if ( s_w_flag eq 1 ) then begin                          ;********winter
+   xyouts,550,140,'National Ice Center',/device, size=2.0, align=0.0  
+endif
+
+xyouts,600,746,'NOAA CoastWatch',/device, size=2.5
+
+; Scale Units
+;print, !p.font
+
+!p.color=0
+!p.font=0
+
+if ( s_w_flag eq 1 ) then begin                          ;********winter
+   xyouts, 700, 650, 'Median Ice Concentration', /device, size=1.6		 
+endif
+
+!p.font=0  
+
+if ( s_w_flag eq 1 ) then begin                          ;********winter
+   xyouts, 890, b_y1+125, '<10%', /device, size=1.4
+   xyouts, 890, b_y1+100, '10-39%', /device, size=1.4
+   xyouts, 890, b_y1+75, '40-69%', /device, size=1.4
+   xyouts, 890, b_y1+50, '70-89%', /device, size=1.4
+   xyouts, 890, b_y1+25, '90-99%', /device, size=1.4
+   xyouts, 890, b_y1, '100%', /device, size=1.4 
+endif
+
+!p.color=254
+
+;  Lat/Lon markings
+
+   for lat=42, 48, 2 do begin   ; draw lat line for 42 to 46 degrees
+     cwmap,ipx,jpx,lat,76,-1    ; input lat and lon, output ipx and jpx
+     xyouts,ipx,jpx+5, string(lat, format='(i2)')+'!9%!X', $
+           /device, size=1.6, align=1.0
+   end
+
+   for lon=78, 90, 2 do begin   ; draw lon line for 78 to 90 degrees
+    cwmap,ipx,jpx,41,lon,-1    ; input lat and lon, output ipx and jpx
+    xyouts, ipx+5, jpx, string(lon, format='(i2)')+'!9%!X', $
+            /device, size=1.6, align=0.0
+  end
+
+
+;a=tvrd(0,0,1024,1024)
+
+; Mark cities
+
+;c1 = {city, name:'Alpena', lat:45.11, lon:83.47}
+;cities = replicate({city}, 14)  ; array contains 14 city structures
+
+!p.color=150
+!p.font=0  
+
+cwmap, ipx, jpx, 45.11, 83.47, -1   ; Alpena
+drawRect, ipx-2, ipx+2, jpx-2, jpx+2, 150
+xyouts,ipx-5, jpx,'Alpena',/dev,size=1.6, align=1.0     
+
+cwmap, ipx, jpx, 42.87, 78.81, -1   ; Buffalo 
+drawRect, ipx-2, ipx+2, jpx-2, jpx+2, 150
+xyouts,ipx+5, jpx,'Buffalo',/dev,size=1.6      
+
+cwmap, ipx, jpx, 41.67, 83.52, -1   ; Toledo 
+drawRect, ipx-2, ipx+2, jpx-2, jpx+2, 150
+xyouts,ipx-5, jpx,'Toledo',/dev,size=1.6, align=1.0      
+ 
+cwmap, ipx, jpx, 41.46, 81.69, -1   ; Cleveland 
+drawRect, ipx-2, ipx+2, jpx-2, jpx+2, 150
+xyouts,ipx+10, jpx-20,'Cleveland',/dev,size=1.6, align=0.5      
+ 
+cwmap, ipx, jpx, 41.87, 87.68, -1   ; Chicago 
+drawRect, ipx-2, ipx+2, jpx-2, jpx+2, 150
+xyouts,ipx-5, jpx,'Chicago',/dev,size=1.6, align=1.0      
+
+cwmap, ipx, jpx, 42.36, 83.07, -1   ; Detroit 
+drawRect, ipx-2, ipx+2, jpx-2, jpx+2, 150
+xyouts,ipx-5, jpx,'Detroit',/dev,size=1.6, align=1.0      
+
+cwmap, ipx, jpx, 43.04, 87.93, -1   ; Milwaukee 
+drawRect, ipx-2, ipx+2, jpx-2, jpx+2, 150
+xyouts,ipx-5, jpx,'Milwaukee',/dev,size=1.6, align=1.0      
+
+cwmap, ipx, jpx, 43.20, 86.25, -1   ; Muskegon 
+drawRect, ipx-2, ipx+2, jpx-2, jpx+2, 150
+xyouts,ipx+5, jpx,'Muskegon',/dev,size=1.6, align=0.0      
+
+cwmap, ipx, jpx, 46.56, 87.44, -1   ; Marquette 
+drawRect, ipx-2, ipx+2, jpx-2, jpx+2, 150
+xyouts,ipx-5, jpx,'Marquette',/dev,size=1.6, align=1.0      
+
+cwmap, ipx, jpx, 46.45, 84.36, -1   ; Sault Ste. Marie 
+drawRect, ipx-2, ipx+2, jpx-2, jpx+2, 150
+xyouts,ipx, jpx-20,'Sault Ste. Marie',/dev,size=1.6, align=1.0      
+  
+cwmap, ipx, jpx, 43.7, 79.4, -1     ; Toronto 
+drawRect, ipx-2, ipx+2, jpx-2, jpx+2, 150
+xyouts,ipx-5, jpx,'Toronto',/dev,size=1.6, align=1.0       
+
+cwmap, ipx, jpx, 44.48, 88.03, -1   ; Green Bay 
+drawRect, ipx-2, ipx+2, jpx-2, jpx+2, 150
+xyouts,ipx-25, jpx-18,'Green Bay',/dev,size=1.6, align=0.5      
+
+cwmap, ipx, jpx, 46.8, 92.12, -1    ; Duluth 
+drawRect, ipx-2, ipx+2, jpx-2, jpx+2, 150
+xyouts,ipx+18, jpx-25,'Duluth',/dev,size=1.6, align=0.5
+
+
+
+;---------------------------------------------------------------------------
+ 
+
+
+; Save to output files
+ 
+fn='glsea_bkg.2020'
+a=tvrd(0,0,1024,1024)
+print,'Writing output file ',fn+'. . .'
+openw,lun,fn,/get_lun
+writeu,lun,a
+free_lun,lun
+
+tvlct, rr, gg, bb, /get
+write_gif, 'bk.gif', a, rr, gg, bb
+ 
+;print,'Writing output file ',fn+'_ps. . .'
+;set_plot,'ps'
+;device,/color,/landscape,/times,bits_per_pixel=8,filename=fn+'_ps'
+;tvlct,red,grn,blu
+;tvlct,200,200,200,254  ;  Gray for state boundaries and lat/lon grid
+;tvlct,  0, 71,153,1    ;  Dark blue for NOAA logo
+;tvlct,  0,189,236,2    ;  Light blue for NOAA logo
+;tvlct,255,255,255,3    ;  White for NOAA logo
+
+;tv,a(*,55:454)
+
+;device,/close
+
+;set_plot,'x'
+
+done:
+end

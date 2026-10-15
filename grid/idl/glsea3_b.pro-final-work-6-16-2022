@@ -1,0 +1,1699 @@
+;--------------------------------------------------------------------------
+pro cwmap,ipx,jpx,lat,lon,conv
+;--------------------------------------------------------------------------
+; Subroutine cwmap: Return pixel location, given latitude and longitude, or
+;  latitude and longitude given pixel location within synoptic 1024x1024
+;  CoastWatch image. (Approximate WGS-84 Mercator Projection - DJS 2007)
+
+
+   ; Set conv to -1 for (lat, lon) to (ipx, jpx) conversion,
+   ; anything else for inverse
+
+   slat  =  38.8744   ;  Southern latitude
+   wlon  = -92.4106   ;  Western longitude
+   elon  = -75.8690   ;  Eastern longitude
+
+   f1 = 0.99664  ; N-S scale adjustment for WGS-84
+
+   ; Constants
+
+   alon0 = -wlon
+   a1 = 1023. / (!dtor * ( elon-wlon ) )
+   y0 = a1 * alog(tan (!dtor * (45.0 + slat / 2.) ))
+
+   ; Calculate latitude and longitude if conv = -1, else calculate ipx and jpx
+
+   if(conv eq -1) then begin
+      ipx=fix(a1*!dtor*(alon0-lon)+0.5)
+      jpx=fix(f1*(a1*alog(tan(!dtor*(45.+lat/2.)))-y0)+0.5)       
+   end else begin
+      lat = 2.0 * ((( atan ( exp ( (jpx/f1 + y0) / a1) )) / !dtor) - 45.0)
+      lon = -1.0*((ipx / (a1 * !dtor)) - alon0)     
+   end
+
+   return
+end
+
+;--------------------------------------------------------------------------
+
+function get_img, fn
+;print, fn(0)
+  sd_interface_id = hdf_sd_start(fn(0), /read)    ; reading hdf file
+
+  hdf_sd_fileinfo, sd_interface_id, datasets, attributes
+  
+  
+
+  img_miss_v = -1
+  dtime_miss_v = 0
+  for i=0, datasets-1 do begin
+    sd_dataset_id = hdf_sd_select(sd_interface_id, i)
+
+    if ( (i ne 5) and (i ne 9) ) then begin     ; no fill value
+       hdf_sd_getinfo, sd_dataset_id, natts=n_atts, ndims=n_dims, dims=dims_v, coordsys=coor, $
+                        name=data_set_name, hdf_type=data_type,label=label, unit=data_unit
+    endif else begin
+       hdf_sd_getinfo, sd_dataset_id, natts=n_atts, ndims=n_dims, dims=dims_v, coordsys=coor, $
+                       fill=miss_v, name=data_set_name, hdf_type=data_type,label=label, unit=data_unit
+
+;print, i, data_set_name
+    endelse
+   
+   ; print, 'sd_dataset_id= ', sd_dataset_id  
+   ; print,'data_set_name= ', data_set_name
+   ; print,'data_type= ', data_type
+   ; print,'n_dims=', n_dims
+   ; print,'dims_v= ', dims_v
+   ; print,'coor= ', coor
+   ;;;; ;print, miss_v
+   ; print, 'label= ', label
+   ; print,'data_unit= ', data_unit
+   ; print, 'n_atts= ', n_atts
+    for j=0, n_atts-1 do begin
+      hdf_sd_attrinfo, sd_interface_id, j, name=this_attr
+   ;   print, this_attr
+    endfor
+    
+    if ( data_set_name eq 'sea_surface_temperature' ) then begin
+      hdf_sd_getdata, sd_dataset_id, img
+      img_arr = img
+      img_miss_v = miss_v
+    ;  print, 'SST miss_v= ', miss_v 
+    endif
+
+    if ( data_set_name eq 'sst_dtime' ) then begin
+      hdf_sd_getdata, sd_dataset_id, img
+      dtime_arr = img
+      dtime_miss_v = miss_v
+     ; print, 'SST dtime miss_v= ', miss_v
+    endif
+
+    HDF_SD_ENDACCESS, sd_dataset_id
+  endfor
+
+  hdf_sd_end, sd_interface_id
+;print, img_arr
+;return, img_arr
+  return, {sst_arr:rotate(img_arr,7), sst_miss_v:img_miss_v, dtime_arr:rotate(dtime_arr,7), dtime_miss_v:dtime_miss_v}
+end
+
+;----------------------------------------
+
+function get_lat_lon, station_fn, station_id
+   lat = 0
+   lon = 0
+
+   openr, lun, station_fn, /get_lun
+
+   line = ''
+   while not eof(lun) do begin
+      readf, lun, line
+      ;print, line
+      s_id = strtrim(strmid(line,1,8))
+      station_type = strmid(line, 0,1)
+      station_name = strmid(line, 16,20)
+      lat_str = strmid(line, 36,4)
+      lon_str = strmid(line, 40,4)
+      if (station_id eq s_id ) then begin
+     ;    print, line
+      ;   print, station_id, ', ', station_name, ', ', lat_str, ', ', lon_str
+         lat = fix(lat_str, type=5) / 100.
+         lon = fix(lon_str, type=5) / 100.
+
+      endif
+
+   endwhile
+
+   free_lun, lun
+
+   return, {lat:lat, lon:lon}
+end
+
+;-------------------
+
+function get_buoy_sst_r_c, station_fn, buoy_list, mask_fn, lmd_fn 
+
+   hr_arr = ['1140', '1150', '1200', '1210','1220']
+
+   openr, lun, mask_fn, /get_lun                                 ;  reads land - water mask
+   b_map = bytarr(1024,1024)
+   readu, lun, b_map
+   free_lun, lun
+
+   water = where(b_map lt 100)
+   b_map(water) = 0            ; water is 0
+
+   land = where(b_map ne 0)
+
+   b_map(land) = 255   ; land is 255
+
+   b_sst_arr = fltarr(n_elements(buoy_list))
+   b_row_arr = fltarr(n_elements(buoy_list))
+   b_col_arr = fltarr(n_elements(buoy_list))
+   
+   b_sst_arr(*) = -1
+
+   openr, lun, lmd_fn, /get_lun
+   line = ''
+
+   sst_arr = fltarr(1024,1024)
+
+   while not eof(lun) do begin
+      readf, lun, line
+      hr_str = strmid(line, 7,4)
+;print, lmd_fn
+;print, line, ' BBBB '
+      station_id = strtrim(strmid(line,12,8))
+      sst_str = strmid(line, 67, 4)
+      sst = fix(sst_str, type=5)
+      lat = strtrim(strmid(line, 82, 5))
+      lon = strtrim(strmid(line, 88, 5))
+	  
+      for n=0, n_elements(hr_arr)-1 do begin
+         if (sst lt 99 and hr_arr(n) eq hr_str  ) then begin
+            if ( lat eq '' ) then begin
+;print, ' DDD ', lat, ' FFF '
+               point = get_lat_lon(station_fn, station_id)
+               lat = point.lat
+               lon = point.lon
+            endif
+         
+            cwmap,ipx,jpx,lat,lon,-1
+        
+            if (ipx ge 0 and ipx lt 1024) and (jpx ge 0 and jpx lt 1024) then begin
+               b_map(ipx, jpx) = 200
+               sst_arr(ipx, jpx) = sst            ; i is col, j is row
+            endif
+
+            for i=0, n_elements(buoy_list)-1 do begin
+                        if ( station_id eq buoy_list(i) ) then begin
+                                print, station_id, ', ', sst, ', ', lat, ', ', lon, ', ', ipx, ', ', jpx
+                                b_col_arr(i) = ipx
+                                b_row_arr(i) = jpx
+                                b_sst_arr(i) = sst
+
+                        endif
+            endfor
+         endif
+	 break
+      endfor
+   endwhile
+
+   free_lun, lun
+
+   ;water_sst_arr = sst_arr(water)
+
+  return, {b_loc_sst:b_sst_arr, b_loc_col:b_col_arr,b_loc_row:b_row_arr}
+end
+
+;--------------------------------------------------------------------------
+
+function get_buoy_sst_increse, b_data1, b_data2, water
+	
+	arr = fltarr(1024,1024)
+	col = b_data1.b_loc_col
+	row = b_data1.b_loc_row
+	
+	arr(*,*) = -100
+
+	for i=0, n_elements(b_data1.b_loc_sst)-1 do begin
+	  if ((b_data1.b_loc_sst(i) ge 0) and ( b_data2.b_loc_sst(i) ge 0)) then begin
+		  sst_increase = b_data1.b_loc_sst(i) - b_data2.b_loc_sst(i)
+		  print, sst_increase
+		  ;help, col, row
+		  for c=col(i)-2, col(i)+2 do begin
+			  for r=row(i)-2, row(i)+2 do begin
+;		  for c=col(i)-10, col(i)+10 do begin
+;			  for r=row(i)-10, row(i)+10 do begin
+   			    if ( (c ge 0) and (c le 1023) and (r ge 0) and (r le 1023) ) then begin
+				    ;print, c, r, b_data1.b_loc_sst(i), b_data2.b_loc_sst(i)
+					arr(c, r) = sst_increase
+                                    ;    arr(c,r) = 200
+				endif
+			  endfor
+		  endfor
+	   endif
+	endfor
+	;b_sst_arr = b_data.b_loc_sst
+	;b_col_arr = b_data.b_loc_col
+	;b_row_arr = b_data.b_loc_row	
+	;print, b_data.b_loc_sst, b_data2.b_loc_sst
+	return, arr(water)
+end
+;--------------------------------------------------------------------------
+
+function water_k_2_arr_k, water, b_ind, arr_size
+; convert index (b_ind) in over water array to index of 1024x1024 array
+
+	water_arr = fltarr(n_elements(water))  ; over water array, size is 148682
+	water_arr(b_ind) = 9000
+
+	img_arr = fltarr(arr_size, arr_size)
+	img_arr(water) = water_arr
+	img_arr_ind = where(img_arr eq 9000)
+
+	return, img_arr_ind
+end
+
+;--------------------------------------------------------------------------
+
+function match_k, a, b
+
+	k_arr = lonarr(100) -1    ; cn hold 60 buoys infor
+
+	n = 0
+	for i=0, n_elements(a)-1 do begin
+
+		for j=0, n_elements(b)-1 do begin
+
+			if ( a(i) eq b(j) ) then begin
+				;print,  a(i)
+
+				if ( n lt n_elements(k_arr) ) then k_arr[n] = a(i)
+
+				n++
+			endif
+		endfor
+	endfor
+	return, k_arr
+end
+
+;--------------------------------------------------------------------------
+
+function get_ice_concentration, raw_ice
+
+   sicode  = ['10','20','30','40','50','60','70','80','90','91','92','93',     $
+              '01','02','12','13','24','35','45','46','57','68','79','89','81',$
+              '11','22','23','33','34','44','55','56','66','67','77','78','88']
+
+                                                   ; GLSEA ice color index
+
+   clridx  = [ 12,  14,  16,  18,  20,  22,  24,  26,  28,  29,  30,  30,      $
+               11,  12,  13,  14,  16,  18,  19,  20,  22,  24,  26,  27,  28, $
+               12,  14,  15,  16,  17,  18,  20,  21,  22,  23,  24,  25,  26]
+
+;-----------------------------------------------------------------------------------
+;  Color               Median Ice                  Color               Median Ice
+;  index    SI Code   Concentration                index    SI Code    Concentration
+;-----------------------------------------------------------------------------------
+;   11          01          5                       24    68,70,77         70
+;   -------------------------
+;   12    02,10,11         10                       25          78         75
+;                                                   26    79,80,88         80
+;   13       12,15         15                       27          89         85
+;                                                   -------------------------
+;   14    13,20,22         20                       28       81,90         90
+;   15          23         25                       29          91         95
+;   16    24,30,33         30                       -------------------------
+;   17          34         35                       30       92,93        100
+;   -------------------------
+;   18    35,40,44         40
+;   19          45         45                     11-12  Off-white
+;   20    46,50,55         50                     13-17  Light gray
+;   21          56         55                     18-23  Medium gray
+;   22    57,60,66         60                     24-29  Dark gray
+;   23          67         65                     30-30  Black
+;-----------------------------------------------------------------------------------
+
+   asc_arr = bytarr(1024,1024)
+
+   ice_index = where( (raw_ice ne 255) and (raw_ice ne 0) )  ; 0 = water,  255 = land (in lce file it is -1)
+   
+   c_01 = where(raw_ice eq 1, c_num)
+   if (c_num ne 0 ) then asc_arr( c_01 ) = 5 
+      
+   c_02 = where(raw_ice eq 2, c_num)
+   if (c_num ne 0 ) then asc_arr( c_02 ) = 10
+   
+   c_10 = where(raw_ice eq 10, c_num)
+   if (c_num ne 0 ) then asc_arr( c_10 ) = 10
+    
+   c_11 = where(raw_ice eq 11, c_num)
+   if (c_num ne 0 ) then asc_arr( c_11 ) = 10
+         
+   c_12 = where(raw_ice eq 12, c_num)
+   if (c_num ne 0 ) then asc_arr( c_12 ) = 15
+    
+   c_15 = where(raw_ice eq 15, c_num)
+   if (c_num ne 0 ) then asc_arr( c_15 ) = 15     
+   
+   c_13 = where(raw_ice eq 13, c_num)
+   if (c_num ne 0 ) then asc_arr( c_13 ) = 20
+   
+   c_20 = where(raw_ice eq 20, c_num)
+   if (c_num ne 0 ) then asc_arr( c_20 ) = 20
+    
+   c_22 = where(raw_ice eq 22, c_num)
+   if (c_num ne 0 ) then asc_arr( c_22 ) = 20   
+  
+   c_23 = where(raw_ice eq 23, c_num)
+   if (c_num ne 0 ) then asc_arr( c_23 ) = 25   
+    
+   c_24 = where(raw_ice eq 24, c_num)
+   if (c_num ne 0 ) then asc_arr( c_24 ) = 30 
+   
+   c_30 = where(raw_ice eq 30, c_num)
+   if (c_num ne 0 ) then asc_arr( c_30 ) = 30
+    
+   c_33 = where(raw_ice eq 33, c_num)
+   if (c_num ne 0 ) then asc_arr( c_33 ) = 30   
+   
+   c_34 = where(raw_ice eq 34, c_num)
+   if (c_num ne 0 ) then asc_arr( c_34 ) = 35  
+    
+   c_35 = where(raw_ice eq 35, c_num)
+   if (c_num ne 0 ) then asc_arr( c_35 ) = 40
+   
+   c_40 = where(raw_ice eq 40, c_num)
+   if (c_num ne 0 ) then asc_arr( c_40 ) = 40
+    
+   c_44= where(raw_ice eq 44, c_num)
+   if (c_num ne 0 ) then asc_arr( c_44 ) = 40   
+ 
+   c_45= where(raw_ice eq 45, c_num)
+   if (c_num ne 0 ) then asc_arr( c_45 ) = 45   
+  
+   c_46 = where(raw_ice eq 46, c_num)
+   if (c_num ne 0 ) then asc_arr( c_46 ) = 50
+   
+   c_50 = where(raw_ice eq 50, c_num)
+   if (c_num ne 0 ) then asc_arr( c_50 ) = 50
+    
+   c_55= where(raw_ice eq 55, c_num)
+   if (c_num ne 0 ) then asc_arr( c_55 ) = 50
+      
+   c_56= where(raw_ice eq 56, c_num)
+   if (c_num ne 0 ) then asc_arr( c_56 ) = 55      
+   
+   c_57 = where(raw_ice eq 57, c_num)
+   if (c_num ne 0 ) then asc_arr( c_57 ) = 60
+   
+   c_60 = where(raw_ice eq 60, c_num)
+   if (c_num ne 0 ) then asc_arr( c_60 ) = 60
+    
+   c_66= where(raw_ice eq 66, c_num)
+   if (c_num ne 0 ) then asc_arr( c_66 ) = 60
+  
+   c_67= where(raw_ice eq 67, c_num)
+   if (c_num ne 0 ) then asc_arr( c_67 ) = 65
+  
+   c_68 = where(raw_ice eq 68, c_num)
+   if (c_num ne 0 ) then asc_arr( c_68 ) = 70
+   
+   c_70 = where(raw_ice eq 70, c_num)
+   if (c_num ne 0 ) then asc_arr( c_70 ) = 70
+    
+   c_77= where(raw_ice eq 77, c_num)
+   if (c_num ne 0 ) then asc_arr( c_77 ) = 70
+ 
+   c_78= where(raw_ice eq 78, c_num)
+   if (c_num ne 0 ) then asc_arr( c_78 ) = 75
+ 
+   c_79 = where(raw_ice eq 79, c_num)
+   if (c_num ne 0 ) then asc_arr( c_79 ) = 80
+   
+   c_80 = where(raw_ice eq 80, c_num)
+   if (c_num ne 0 ) then asc_arr( c_80 ) = 80
+    
+   c_88= where(raw_ice eq 88, c_num)
+   if (c_num ne 0 ) then asc_arr( c_88 ) = 80
+
+   c_89= where(raw_ice eq 89, c_num)
+   if (c_num ne 0 ) then asc_arr( c_89 ) = 85 
+  
+   c_81 = where(raw_ice eq 81, c_num)
+   if (c_num ne 0 ) then asc_arr( c_81 ) = 90
+   
+   c_90 = where(raw_ice eq 90, c_num)
+   if (c_num ne 0 ) then asc_arr( c_90 ) = 90        
+    
+   c_91= where(raw_ice eq 91, c_num)
+   if (c_num ne 0 ) then asc_arr( c_91 ) = 95
+
+   c_92= where(raw_ice eq 92, c_num)
+   if (c_num ne 0 ) then asc_arr( c_92 ) = 100
+  
+   c_93= where(raw_ice eq 93, c_num)
+   if (c_num ne 0 ) then asc_arr( c_93 ) = 100
+       
+   return, asc_arr
+end
+
+;-----------------------------------------------------------------------------------
+
+function get_year_month_day, yra, jda
+   
+   n_yr = fix(yra)                  ; float to int
+   n_jd = fix(jda)
+
+   total_jd = julday( 1, 0, n_yr )
+   total_jd = total_jd + n_jd
+
+   caldat, total_jd, month, day, year
+   year  = strtrim(year,1) 			; leading blanks are removed
+   month = strtrim(month,1)
+   day   = strtrim(day,1)
+   
+   y_m_d = string(year, format='(i4)') + string(month,format='(i2.2)') +string(day,format='(i2.2)')  
+   return, y_m_d
+end
+
+;-----------------------------------------------------------------------------------
+
+function get_ice_fn, ice_dir, yra, jda
+
+   n_yr = fix(yra)                  ; float to int
+   n_jd = fix(jda)
+      
+   num = 0                          ; no ice file
+   loop = 5                         ; check till 5 days back if no ice file
+
+   while ( (num eq 0) and (loop ge 0) ) do begin
+         total_jd = julday( 1, 0, n_yr )
+         total_jd = total_jd + n_jd
+   
+         caldat, total_jd, month, day, year
+         year  = strtrim(year,1) 			; leading blanks are removed
+         month = strtrim(month,1)
+         day   = strtrim(day,1)
+ 
+         mn_arr = [ '00', '01','02','03' ,'04','05','06','07','08','09','10','11','12' ]
+ 
+         s_yr = string(n_yr,format='(i4)')     
+         s_jd = string(n_jd,format='(i3.3)')
+         ice_fn = ice_dir + year + '/' + mn_arr(month) + '/g' + s_yr + s_jd + '00.lce'
+
+         rt = file_search( ice_fn, count=num)
+         if ( num eq 0 ) then begin
+            n_jd = n_jd - 1
+            if ( n_jd le 0 ) then begin
+               
+               n_yr = n_yr - 1
+
+              if ( n_yr mod 4 ) then begin
+                  n_jd = 365
+              endif else begin
+                  n_jd = 366
+              endelse
+            end
+         end
+         loop = loop - 1
+         ;   print, ice_fn, ' loop = ', loop, ' n_jd= ', n_jd
+
+   endwhile
+  
+   if ( num eq 0 ) then begin
+        ice_fn = ''
+   end
+
+   return, ice_fn
+end
+
+
+;-----------------------------------------------------------------------------------
+
+pro ch_ipx_jpx, ch_ncep_fn, ipx, jpx, indx_arr, c_i_arr, c_j_arr
+   
+   index_len = 22  ; 22 point out of the water that need to swift from land to water
+
+   indx = 0
+   c_i = 0
+   c_j = 0
+   line = ' '
+  
+   openr, lun, ch_ncep_fn, /get_lun
+   readf, lun, line
+
+   for k=0, index_len-1 do begin
+      readf, lun, line
+         ; print, line
+      reads, line, indx, c_i, c_j     
+      ipx(indx) = ipx(indx) + c_i
+      jpx(indx) = jpx(indx) + c_j
+      indx_arr(k) = indx
+      c_i_arr(k) = c_i
+      c_j_arr(k) = c_j
+
+         ;print, indx, c_i, c_j
+   end
+   free_lun, lun
+   return
+end
+
+;-----------------------------------------------------------------------------------
+
+pro  mk_ncep_data, ncepetagl_fn, ncep_fn, ch_ncep_fn, land_mask, raw_ice, w_sst, ice_season
+
+   indx_len    = 287
+   ch_indx_len = 22
+
+   lat_arr = fltarr(indx_len)
+   lon_arr = fltarr(indx_len)
+   ind_arr = lonarr(indx_len)
+
+   ch_ind_arr = intarr(ch_indx_len)
+   ch_i_arr   =  intarr(ch_indx_len)
+   ch_j_arr   =  intarr(ch_indx_len)
+
+   line = ' '
+   openr, lun, ncep_fn, /get_lun
+   readf, lun, line, line
+
+   index = 0
+   lat = 0.0
+   lon = 0.0
+
+   for k=0, indx_len-1 do begin
+      readf, lun, line
+           ; print, line
+      reads, line, index, lat, lon
+      ind_arr(k) = index
+      lon_arr(k) = 360 - lon  
+      lat_arr(k) = lat
+    
+      ; print, ind_arr(k), lat_arr(k), lon_arr(k) 
+   end
+
+   free_lun, lun
+  
+   cwmap,ipx ,jpx ,lat_arr,lon_arr, -1
+   ch_ipx_jpx, ch_ncep_fn, ipx, jpx, ch_ind_arr,ch_i_arr,ch_j_arr
+   cwmap,ipx ,jpx ,lat_arr,lon_arr, 0                                ; get new lat and lon
+       
+   asc_arr = fltarr(1024,1024)
+   ice_arr = raw_ice             ; for non ice season
+
+   water=where(land_mask lt 100,nwater)
+   asc_arr(water) = w_sst
+
+   if ( ice_season eq 1 ) then begin  
+       ice_arr = get_ice_concentration( raw_ice )
+ 
+      ice_index = where( (raw_ice ne 255) and (raw_ice ne 0) )  ; 0 = water,  255 = land (in lce file it is -1)
+      asc_arr(ice_index) = 0.2
+   endif
+   
+   fn = file_basename(ncepetagl_fn)      ; fn    = 'ncepetagl20140124.dat'
+   y_m_d = strmid(fn, 9,8)               ; y_m_d = '20140124'
+   openw, lun, ncepetagl_fn, /get_lun
+   printf, lun, y_m_d, '0.2 degree C used for ice covered pixels', format='(a8, a54)'
+
+   for k=0, indx_len-1 do begin
+      done = 0
+      for n=0, ch_indx_len-1 do begin
+         if ( k eq ch_ind_arr(n) ) then  begin
+             ; print, ind_arr(k) , asc_arr(ipx(k), jpx(k)), ice_arr( ipx(k), jpx(k))/100., k+1, ch_j_arr(n), ch_i_arr(n), lat_arr(k),lon_arr(k), format='(i5,  f5.1, f5.2, i8, i4,i4,  f7.3, f8.3)'
+             if ( ice_season eq 1 ) then begin
+                printf, lun,  ind_arr(k) , asc_arr(ipx(k), jpx(k)), ice_arr(ipx(k), jpx(k))/100., k+1, ch_j_arr(n), ch_i_arr(n), lat_arr(k),lon_arr(k), format='(i5,  f5.1, f5.2, i8, i4,i4, f7.3, f8.3)'
+             endif else begin
+               ; printf, lun,  ind_arr(k) , asc_arr(ipx(k), jpx(k)), ice_arr, k+1, ch_j_arr(n), ch_i_arr(n), lat_arr(k),lon_arr(k), format='(i5,  f5.1, f5.2, i8, i4,i4, f7.3, f8.3)'
+                printf, lun,  ind_arr(k) , asc_arr(ipx(k), jpx(k)), 0, k+1, ch_j_arr(n), ch_i_arr(n), lat_arr(k),lon_arr(k), format='(i5,  f5.1, f5.2, i8, i4,i4, f7.3, f8.3)'
+            endelse
+
+             done = 1
+             break
+         end           
+      end ;for
+    
+      if ( done eq 0 ) then begin
+         ; print, ind_arr(k) , asc_arr(ipx(k), jpx(k)), ice_arr( ipx(k), jpx(k))/100., k+1,  format='(i5,  f5.1,   f5.2, i8)'
+         printf, lun,  ind_arr(k) , asc_arr(ipx(k), jpx(k)), ice_arr( ipx(k), jpx(k))/100., k+1,  format='(i5,  f5.1,   f5.2, i8)'
+      endif
+
+      ;aa = where( (asc_arr(ipx(k), jpx(k)) eq 0) and (ice_arr( ipx(k), jpx(k)) eq 0) )
+      ;print,k, aa 
+
+   end ; for
+    
+   free_lun, lun
+   return
+end
+
+;-----------------------------------------------------------------------------------
+
+; img get the color index based on the ice code
+
+pro ice_overlay, raw_ice, img
+
+
+   sicode  = ['10','20','30','40','50','60','70','80','90','91','92','93',     $
+              '01','02','12','13','24','35','45','46','57','68','79','89','81',$
+              '11','22','23','33','34','44','55','56','66','67','77','78','88']
+
+                                                   ; GLSEA ice color index
+
+   clridx  = [ 12,  14,  16,  18,  20,  22,  24,  26,  28,  29,  30,  30,      $
+               11,  12,  13,  14,  16,  18,  19,  20,  22,  24,  26,  27,  28, $
+               12,  14,  15,  16,  17,  18,  20,  21,  22,  23,  24,  25,  26]
+
+;-----------------------------------------------------------------------------------
+;  Color               Median Ice                  Color               Median Ice
+;  index    SI Code   Concentration                index    SI Code    Concentration
+;-----------------------------------------------------------------------------------
+;   11          01          5                       24    68,70,77         70
+;   -------------------------
+;   12    02,10,11         10                       25          78         75
+;                                                   26    79,80,88         80
+;   13       12,15         15                       27          89         85
+;                                                   -------------------------
+;   14    13,20,22         20                       28       81,90         90
+;   15          23         25                       29          91         95
+;   16    24,30,33         30                       -------------------------
+;   17          34         35                       30       92,93        100
+;   -------------------------
+;   18    35,40,44         40
+;   19          45         45                     11-12  Off-white
+;   20    46,50,55         50                     13-17  Light gray
+;   21          56         55                     18-23  Medium gray
+;   22    57,60,66         60                     24-29  Dark gray
+;   23          67         65                     30-30  Black
+;-----------------------------------------------------------------------------------
+ 
+   if ( max(raw_ice gt 0) ne 0) then begin
+      for sigrid=0,n_elements(sicode)-1 do begin
+          ; print, sigrid, ' ', sicode(sigrid)
+         nice=0 & ice_index=where(raw_ice eq sicode(sigrid),nice)
+         if (nice gt 0) then img(ice_index)=clridx(sigrid)
+      end
+   end   
+  
+   return
+end
+ 
+;-----------------------------------------------------------------------------------
+
+pro get_raw_ice, ice_fn, nb_fn, land_mask, raw_ice
+
+   land = where(land_mask ge 100)
+
+   openr, lun, ice_fn, /get_lun
+
+   name       = ' '       
+   date       = ' '
+   ncols      = ' '
+   nrows      = ' '
+   xllcorner  = ' ' 
+   yllcorner  = ' ' 
+   cellsize   = ' '    
+   NODATA_value = ' '  
+ 
+   readf,lun, name, date, ncols,nrows,xllcorner,yllcorner,cellsize,NODATA_value 
+   readf,lun,raw_ice
+   raw_ice = rotate(temporary(raw_ice),7)
+
+   openr, lun, nb_fn, /get_lun
+
+   line = ' '
+   readf, lun, line, line, line,line, line, line
+
+   while not eof(lun) do begin
+      readf, lun, line
+           ; print, line
+      o_col = 0
+      o_row = 0
+      red = 0
+      n_col = 0
+      n_row = 0
+      blue = 0
+      flag = 0
+   
+      reads, line, o_col, o_row, red, n_col, n_row, blue, flag 
+   
+           ;print, o_col, o_row, red, n_col, n_row, blue, flag 
+      raw_ice(o_col, o_row) = raw_ice(n_col, n_row) 
+   end
+   
+   free_lun, lun
+   
+   raw_ice(land) = -1.0    ; change ice to land (cw is land, nic is ice)
+
+   return
+end
+
+ 
+;-----------------------------------------------------------------------------------
+
+function agv_with_ice, raw_ice, land_mask,  w_sst
+
+   l_s_index  = where( (land_mask le 7 ) and (land_mask ge 1 ) , s_num )
+   l_m_index  = where( (land_mask le 14) and (land_mask ge 11) , m_num)
+   l_h_index  = where( (land_mask le 26) and (land_mask ge 21) , h_num)
+   l_st_index = where( (land_mask le 31) and (land_mask ge 30) , St_num)  ; 30 is Lake St. Clair
+   l_e_index  = where( (land_mask le 44) and (land_mask ge 41) , e_num)
+   l_o_index  = where( (land_mask le 52) and (land_mask ge 51) , o_num)
+
+   asc_arr = fltarr(1024,1024)
+
+   water=where(land_mask lt 100,nwater)
+   asc_arr(water) = w_sst
+  
+   ice_index = where( (raw_ice ne 255) and (raw_ice ne 0) )  ; 0 = water,  255 = land (in lce file it is -1)
+   asc_arr(ice_index) = 0.2
+    
+   avg_arr = fltarr(6)
+
+   avg_arr(0) =  mean( asc_arr(l_s_index) )
+   avg_arr(1) =  mean( asc_arr(l_m_index) )
+   avg_arr(2) =  mean( asc_arr(l_h_index) )
+   avg_arr(3) =  mean( asc_arr(l_st_index) )
+   avg_arr(4) =  mean( asc_arr(l_e_index) )
+   avg_arr(5) =  mean( asc_arr(l_o_index) )
+      
+   return, avg_arr
+end
+
+;-----------------------------------------------------------------------------------
+
+pro  asc_fill_ice, raw_ice, asc_arr
+
+   c_01 = where(raw_ice eq 1, c_num)
+   if (c_num ne 0 ) then asc_arr( c_01 ) = 99.005 
+      
+  
+   c_02 = where(raw_ice eq 2, c_num)
+   if (c_num ne 0 ) then asc_arr( c_02 ) = 99.010
+   
+   c_10 = where(raw_ice eq 10, c_num)
+   if (c_num ne 0 ) then asc_arr( c_10 ) = 99.010
+    
+   c_11 = where(raw_ice eq 11, c_num)
+   if (c_num ne 0 ) then asc_arr( c_11 ) = 99.010
+     
+     
+   c_12 = where(raw_ice eq 12, c_num)
+   if (c_num ne 0 ) then asc_arr( c_12 ) = 99.015
+    
+   c_15 = where(raw_ice eq 15, c_num)
+   if (c_num ne 0 ) then asc_arr( c_15 ) = 99.015
+     
+   
+   c_13 = where(raw_ice eq 13, c_num)
+   if (c_num ne 0 ) then asc_arr( c_13 ) = 99.020
+   
+   c_20 = where(raw_ice eq 20, c_num)
+   if (c_num ne 0 ) then asc_arr( c_20 ) = 99.020
+    
+   c_22 = where(raw_ice eq 22, c_num)
+   if (c_num ne 0 ) then asc_arr( c_22 ) = 99.020
+   
+  
+   c_23 = where(raw_ice eq 23, c_num)
+   if (c_num ne 0 ) then asc_arr( c_23 ) = 99.025
+   
+    
+   c_24 = where(raw_ice eq 24, c_num)
+   if (c_num ne 0 ) then asc_arr( c_24 ) = 99.030 
+   
+   c_30 = where(raw_ice eq 30, c_num)
+   if (c_num ne 0 ) then asc_arr( c_30 ) = 99.030
+    
+   c_33 = where(raw_ice eq 33, c_num)
+   if (c_num ne 0 ) then asc_arr( c_33 ) = 99.030
+   
+   
+   c_34 = where(raw_ice eq 34, c_num)
+   if (c_num ne 0 ) then asc_arr( c_34 ) = 99.035
+  
+    
+   c_35 = where(raw_ice eq 35, c_num)
+   if (c_num ne 0 ) then asc_arr( c_35 ) = 99.040
+   
+   c_40 = where(raw_ice eq 40, c_num)
+   if (c_num ne 0 ) then asc_arr( c_40 ) = 99.040
+    
+   c_44= where(raw_ice eq 44, c_num)
+   if (c_num ne 0 ) then asc_arr( c_44 ) = 99.040
+   
+ 
+   c_45= where(raw_ice eq 45, c_num)
+   if (c_num ne 0 ) then asc_arr( c_45 ) = 99.045
+   
+  
+   c_46 = where(raw_ice eq 46, c_num)
+   if (c_num ne 0 ) then asc_arr( c_46 ) = 99.050
+   
+   c_50 = where(raw_ice eq 50, c_num)
+   if (c_num ne 0 ) then asc_arr( c_50 ) = 99.050
+    
+   c_55= where(raw_ice eq 55, c_num)
+   if (c_num ne 0 ) then asc_arr( c_55 ) = 99.050
+   
+   
+   c_56= where(raw_ice eq 56, c_num)
+   if (c_num ne 0 ) then asc_arr( c_56 ) = 99.055
+      
+   
+   c_57 = where(raw_ice eq 57, c_num)
+   if (c_num ne 0 ) then asc_arr( c_57 ) = 99.060
+   
+   c_60 = where(raw_ice eq 60, c_num)
+   if (c_num ne 0 ) then asc_arr( c_60 ) = 99.060
+    
+   c_66= where(raw_ice eq 66, c_num)
+   if (c_num ne 0 ) then asc_arr( c_66 ) = 99.060
+
+  
+   c_67= where(raw_ice eq 67, c_num)
+   if (c_num ne 0 ) then asc_arr( c_67 ) = 99.065
+  
+ 
+   c_68 = where(raw_ice eq 68, c_num)
+   if (c_num ne 0 ) then asc_arr( c_68 ) = 99.070
+   
+   c_70 = where(raw_ice eq 70, c_num)
+   if (c_num ne 0 ) then asc_arr( c_70 ) = 99.070
+    
+   c_77= where(raw_ice eq 77, c_num)
+   if (c_num ne 0 ) then asc_arr( c_77 ) = 99.070
+
+ 
+   c_78= where(raw_ice eq 78, c_num)
+   if (c_num ne 0 ) then asc_arr( c_78 ) = 99.075
+ 
+ 
+   c_79 = where(raw_ice eq 79, c_num)
+   if (c_num ne 0 ) then asc_arr( c_79 ) = 99.080
+   
+   c_80 = where(raw_ice eq 80, c_num)
+   if (c_num ne 0 ) then asc_arr( c_80 ) = 99.080
+    
+   c_88= where(raw_ice eq 88, c_num)
+   if (c_num ne 0 ) then asc_arr( c_88 ) = 99.080
+
+ 
+   c_89= where(raw_ice eq 89, c_num)
+   if (c_num ne 0 ) then asc_arr( c_89 ) = 99.085
+ 
+  
+   c_81 = where(raw_ice eq 81, c_num)
+   if (c_num ne 0 ) then asc_arr( c_81 ) = 99.090
+   
+   c_90 = where(raw_ice eq 90, c_num)
+   if (c_num ne 0 ) then asc_arr( c_90 ) = 99.090
+        
+    
+   c_91= where(raw_ice eq 91, c_num)
+   if (c_num ne 0 ) then asc_arr( c_91 ) = 99.095
+
+
+   c_92= where(raw_ice eq 92, c_num)
+   if (c_num ne 0 ) then asc_arr( c_92 ) = 99.100
+  
+   c_93= where(raw_ice eq 93, c_num)
+   if (c_num ne 0 ) then asc_arr( c_93 ) = 99.100
+   
+   return
+end
+
+;---------------------------------------------------------------------------
+
+pro mk_glsea_asc, asc_fn, asc_arr
+      
+   openw, lun, asc_fn, /get_lun
+
+   printf, lun, 'ncols         1024'
+   printf, lun, 'nrows         1024'
+
+;   printf, lun, 'xllcorner     -10288021.955346'
+;   printf, lun, 'yllcorner     4675974.1582466'
+
+   printf, lun, 'xllcorner     -10288921.955'    ; corrected x, y
+   printf, lun, 'yllcorner     4676874.158'
+   printf, lun, 'cellsize      1800'
+   printf, lun, 'NODATA_value  -9999.0'
+
+   for i=1024-1, 0, -1 do begin
+          printf, lun, asc_arr(*,i),  format='(1024f8.3)'
+   endfor
+      ;printf, lun, asc_arr
+   free_lun, lun
+   return
+end
+
+;-----------------------------------------------------------------------------------
+
+function get_gl_ice_cover, land_mask, raw_ice 
+ 
+   water = where( land_mask ne 255, water_pix_num )
+   gl_ice_pix_value = raw_ice(water)
+   gl_sum = total(gl_ice_pix_value)   ; total ice contration over water
+ 
+   return, gl_sum / water_pix_num
+
+end
+
+;-----------------------------------------------------------------------------------
+
+; s_w_flag:    0 -- summer, 1 -- winter
+
+pro mk_glsea_png, png_fn, ice_fn, bk_fn, c_pal_fn, land_mask, raw_ice, farr, nk1, s_w_flag 
+    
+   openr,lun, c_pal_fn,/get_lun
+
+   a=' '
+   b=bytarr(3,256)
+   readf, lun,a,format='(a)' 
+   readf, lun,b,format='(3z2.2)'
+   free_lun, lun
+
+   red=bytarr(256)                   ; Color map
+   grn=bytarr(256)
+   blu=bytarr(256)
+   red(*)=b(0,*)
+   grn(*)=b(1,*)
+   blu(*)=b(2,*)
+ 
+   tvlct,b(0,*),b(1,*),b(2,*)
+
+   tvlct,215,239,255,254             ; Color 254 to light blue
+
+   tvlct,  0, 71,153,1               ; for NOAA logo
+   tvlct,  0,189,236,2
+   tvlct,255,255,255,3
+ 
+   water = where( land_mask ne 255, num )
+
+   bk_img = bytarr(1024,1024)
+   openr, lun, bk_fn, /get_lun
+   readu, lun, bk_img
+   free_lun,lun
+ 
+   ; in composit.pal, each color take 5 line, 30 * 5 = 150
+   ; index under 50 is reserved
+ 
+   bk_img(water) = round( farr / 30. * 150 ) + 50     
+ 
+   if ( s_w_flag eq 1 ) then begin             ; winter ice overlay
+
+      tvlct, 220,220,220,11			; color for ice  scale
+
+      for i=12, 17 do begin
+         tvlct, 190,190,190, i
+      end
+
+      for i=18, 23 do begin			
+         tvlct, 160,160,160, i
+      end
+ 
+      for i=24, 27 do begin
+         tvlct, 110,110,110, i
+      end
+
+      for i=28, 29 do begin
+         tvlct, 70,70,70, i
+      end
+
+      tvlct, 0,0,0,30
+      
+      ice_overlay, raw_ice, bk_img
+
+
+   endif
+ 
+   tv, bk_img
+
+   !p.color=0
+   !p.font=1   ; true font
+   !p.charthick=0.5   ; font will be darker
+   !p.charsize=2.5
+
+   fn = file_basename(png_fn)    ; fn = 2014_029_glsea.dat
+   str_yr = strmid(fn, 0, 4)
+   str_jd = strmid(fn, 5, 3)
+
+   start_jd = julday(1,0, str_yr)
+   n_jd = start_jd + str_jd
+   caldat, n_jd, mo, dy
+
+   str_mo = string(mo, format='(i2.2)')
+   str_dy = string(dy, format='(i2.2)')
+   ;xyouts,494,840,'Analysis Date:  JD 230  08/18/2006',/device, size=2.4
+ 
+   xyouts,494,840,'Analysis Date:  JD '+str_jd+' '+str_mo+'/'+str_dy+'/'+str_yr,/device 
+ 
+   if ( s_w_flag eq 1 ) then begin             ; winter ice overlay
+
+      if ( strlen(ice_fn) ne 0 ) then begin
+         ifn = file_basename(ice_fn)              
+         i_yr = strmid(ifn, 1, 4)
+         i_jd = strmid(ifn, 5,3)
+      
+         i_start_jd = julday(1,0,i_yr)
+
+         caldat, i_start_jd+i_jd, month, day, year
+         ;print, month, day, year
+ 
+         year  = strtrim(year,1)
+         month = strtrim(month,1)
+         day   = strtrim(day,1)
+ 
+         xyouts, 512, 776, 'Date of last ice analysis: ' +month+'/'+day+'/'+year,/device 
+
+         ice_arr = get_ice_concentration( raw_ice )
+
+         ice_total = get_gl_ice_cover(land_mask, ice_arr )
+         str_total = string(ice_total, format='(f5.1)')
+ 
+         xyouts, 550, 700, 'Great Lakes Total Ice Cover: ' + str_total + '%', /device 
+
+      endif else begin
+         xyouts, 512, 776, 'Date of last ice analysis: ' + '00/00/0000',/device 
+      endelse
+      
+   endif
+ 
+   p_pix = nk1 / 148682. * 100.
+
+   str_p_pix = string(p_pix, format='(f5.1)')
+   ;xyouts,424,810,'Percent Pixels with Data within +/-10 Days: 99.9%',/device, size=2.4
+  
+;   xyouts,414,810,'Percent Pixels with Data within +/-10 Days: '+str_p_pix +'%',/device 
+ 
+
+   xyouts,414,810,'Percent Pixels with Data within +/-10 Days: '+str_p_pix +'%',/device, charsize=2.2
+
+   yr4 = strmid(file_basename(png_fn), 0,4)
+   jd3 = strmid(file_basename(png_fn), 5,3)
+
+;   cloud_free_pct = get_cloud(yr4+'_'+jd3)
+
+;   xyouts,155,120, 'AVG Cloud Free - Superior: ' + string(cloud_free_pct(0), format='(f5.1)') +  $
+;                      ' %, Michigan: ' + string(cloud_free_pct(1), format='(f5.1)') + $
+;                      ' %, Huron: ' + string(cloud_free_pct(2), format='(f5.1)') + $
+;                      ' %, Erie:' + string(cloud_free_pct(3), format='(f5.1)') + $
+;                      ' %, Ontario:' + string(cloud_free_pct(4), format='(f5.1)') + $
+;                      ' %, St Clair:' + string(cloud_free_pct(5), format='(f5.1)') + ' %', charsize=1.4, /device
+
+
+   img800=tvrd(0, 109, 1024,800)
+   tvlct, rr, gg, bb, /get
+   ;print, 'Make ' + png_fn + ' ...'
+   write_png, png_fn, img800, rr, gg, bb
+   
+   return
+end
+
+;-----------------------------------------------------------------------------------
+
+pro mk_glsea_i_dat, i_dat_fn, asc_arr, water 
+
+   ;print, 'Make ' + i_dat_fn + ' ...'
+  
+   openw, lun, i_dat_fn, /get_lun
+ 
+   farr = asc_arr(water)   
+ 
+   printf, lun, farr, format='(f7.3)' 
+  
+   free_lun, lun
+   return
+end
+
+;-----------------------------------------------------------------------------------
+
+;=========================================================================
+; GLSEA3 - IDL program to create 1024 x 1024 composite SST map from
+;  NOAA Great Lakes Coastwatch AVHRR SST images 
+;
+; D.J. Schwab, 6/2007
+; Songzhi Liu  1/2014  adding ice overlay, necp, png, asc, i_dat
+;=========================================================================
+
+pro main
+
+   work_dir = '/home/cw/opr/glsea3_b/'
+   out_dir  = work_dir + 'output/'
+   ncep_dir = work_dir + 'ncep/'
+   back_dir = work_dir + 'bkg/'
+
+   s_bk_fn  = back_dir + 'glsea_bkg.1024.summer'
+   w_bk_fn  = back_dir + 'glsea_bkg.1024.winter'
+   c_pal_fn = back_dir + 'composit.pal'
+
+   ice_dir  = '/mnt/cwdata/p/s/lic/'
+
+   mask_dir = '/home/cw/masks/1024/'
+   mask_fn  = mask_dir + 'cwglsyrd.byt'
+   nb_fn    = mask_dir + 'ice_land_mask_neighbor_final.txt'
+
+   buoy_data_dir = '/mnt/cwdata/p/s/lmd/'
+   station_fn = buoy_data_dir + 'stations.lmd'
+   
+   ncep_fn    = ncep_dir + 'ncep_latlon.dat'
+   ch_ncep_fn = ncep_dir + 'ch_ncep_latlon.dat'
+
+ ;  buoy_list = ['45001','45002','45003','45004','45005','45006', '45007','45008', '45028','45136','45014','45013','46187','46186','46174','46170','45170','45026','46168','45029','46024','45183','45143','45154','45147','45132','45167','45142','45139','45159','45012','45135']
+   buoy_list = [ '45028','45136','45014','45013','46187','46186','46174','46170','45170','45026','46168','45029','46024','45183','45143','45154','45147','45132','45167','45142','45139','45159','45012','45135']
+
+ ;  buoy_list = ['45029'] ; 45003 is one
+
+  ; begin_ice = 318
+  ; end_ice   = 158
+
+   begin_ice = getenv('BEGIN_ICE')
+   end_ice   = getenv('END_ICE')
+
+   close,/all
+
+   ; get control parameters from file 'glsea.in'
+
+   ;  line 1: start date (YYYY JJJ)
+   ;  line 2: end date (YYYY JJJ)
+   ;  line 3: file containing sst file names (including full path)
+   ;  line 4: file containing cloud mask file names (including full path)
+   ;  line 5: glsea file directory (for previous day and stats.in,out files)
+
+   readascii, work_dir + 'glsea.in',a
+   
+   reads,a(0),yrstart,jdstart
+   reads,a(1),yrend,jdend
+   flist  = ''
+   ;cmlist = ''
+   glsea_dir = ''
+   
+   reads,a(2),flist 
+   reads,a(3),glsea_dir
+
+   print,yrstart,jdstart
+   print,yrend,jdend
+
+   print,flist
+   print,glsea_dir
+
+   ; interpolation parameters
+
+   dtmax=10       ; time window (days)
+   dtfac=0.01     ; time scaling factor
+   rmax=2         ; space window (pixels)
+   rfac=0.1       ; space scaling factor
+
+   dtmax2=dtmax*dtmax
+   rmax2=rmax*rmax
+
+   ;set_plot,'x'
+   ;device,decomposed=0,pseudo=8
+   ;window,xs=1024,ys=1024,colors=256
+
+   set_plot,'z'
+   device,set_colors=256,set_res=[1024,1024]
+
+   loadct,33
+   tvlct,0,0,0,0
+   tvlct,255,255,255,255
+   tvlct,red,grn,blu,/get
+
+   img    = bytarr(1024,1024)
+   lmask  = bytarr(1024,1024)
+
+   lakeavg1 = fltarr(6)
+   lakeavg2 = fltarr(6)
+
+   ; Read over-water mask
+
+   print,format='(1x,a)','Reading over-water mask file . . .'
+   openr,lunm,mask_fn,/get_lun
+   readu,lunm,lmask
+   close,lunm
+   free_lun,lunm
+
+   ; Define over-water array
+
+   water = where(lmask lt 100,nwater)
+   land  = where(lmask ge 100)
+   a2 = fltarr(nwater)        ; yesterday's temperature map
+
+   ; Count neighboring water pixels
+
+   nghbr=bytarr(1024,1024)
+   
+   for ix=-1,1 do begin
+      for jx=-1,1 do begin
+         img2 = shift(lmask,ix,jx)
+         k = where(img2 le 100 and lmask le 100)
+         nghbr(k) = nghbr(k)+1
+      end
+   end
+
+   ; Set up index array for water pixels
+
+   index = lonarr(1024,1024)
+   index(water) = lindgen(nwater)
+
+   ; Set up lake indices
+
+   lake = fix(lmask(water)/10)    ; array lake get value of 0, 1, 2, 3, 4, 5 represent each lakes
+
+   ; get filenames
+
+   readascii,flist,fns
+   nf = n_elements(fns)
+
+   ; strip off directory
+   print, fns
+   print, 'song'
+   fbs = file_basename(fns)
+
+   ; get time and other info from cw filemname yyyy-jjj-hhmm-sss-nr-pp.typ
+
+   yr0=intarr(nf)
+   jd0=intarr(nf)
+   mn0=intarr(nf)
+   dy0=intarr(nf)
+   hr0=intarr(nf)
+   mi0=intarr(nf)
+   sat=intarr(nf)
+   prod=strarr(nf)
+
+;print, fbs(0)
+   reads,fbs,yr0,format='(3x,i4)'
+   reads,fbs,mn0,format='(7x,i2)'
+   reads,fbs,dy0,format='(9x,i2)'
+  
+  ; reads,fbs,jd0,format='(5x,i3)'
+   reads,fbs,hr0,format='(11x,i2)'
+
+   ; jd of each files, ie. from jd 1 to jd 21
+   jd0 = julday(mn0, dy0, yr0) - julday(1, 0, yr0) 
+
+;   reads,fbs,mn0,format='(11x,i2)'
+;   reads,fbs,sat,format='(15x,i2)'
+;   reads,fbs,prod,format='(21x,a1)'
+
+   ;convert time to julday
+
+   j0=julday(1,1,yr0)-julday(1,1,yrstart)+jd0-1+hr0/24.+mi0/(24.*60.)
+
+   ; open old stats files (must contain info for at least 2 previous days)
+
+   readascii,glsea_dir+'/stats.in',oldstats
+   n=n_elements(oldstats)
+   yr=intarr(n)
+   jd=intarr(n)
+   yrs=yrstart
+   jds=jdstart-1
+
+   if(jds eq 0) then begin
+      yrs=yrs-1
+      jds=365
+      if(yrs mod 4 eq 0) then jds=366
+   end
+
+   reads,oldstats,yr,format='(i8)'
+   reads,oldstats,jd,format='(8x,i8)'
+
+   k=where(yr eq yrs and jd eq jds,nk)
+
+   if(k(0) lt 1) then begin
+      print,'Cannot find stats from previous two days'
+     stop
+   end else begin
+      reads,oldstats(k),lakeavg1,format='(48x,6f7.2)'
+      reads,oldstats(k-1),lakeavg2,format='(48x,6f7.2)'
+   end
+
+   openw,2,glsea_dir+'/stats.out'
+   printf,2,oldstats(0:k),format='(a)'
+
+   ; get analysis from previous day
+
+   a2 = fltarr(nwater)
+   reads,oldstats(k),yra,jda,format='(2i8)'   ; get year, jd from stats.in
+
+   str_yr = string(yra,format='(i4)')
+   str_jd = string(jda,format='(i3.3)')
+
+   fn = glsea_dir+'/'+str_yr+'_'+ str_jd+'_glsea.dat'
+   print, fn, ' liu'
+   openr,1,fn
+   readf,1, a2, format='(f5.2)'      
+   close,1
+
+   ;reads,oldstats(k-1), yra2, jda2,format='(2i8)'   ; get year, jd from stats.in (for buoy data)
+
+   ;str_yr2 = string(yra2,format='(i4)')      ; the year match the day before str_jd
+   ;str_jd2 = string(jda2,format='(i3.3)')    ; the day before str_jd
+	 
+	; get buoy data
+	
+;;	o_jd = julday(1,0,yra)
+;;	caldat, o_jd+jda, m1, d1, yr1
+	
+;;	str_mn = string(m1,format='(i2.2)')
+	
+;;  o_jd2 = julday(1,0,yra2)
+;;	caldat, o_jd2+jda2, m2, d2, yr2
+	
+;;	str_mn2 = string(m2,format='(i2.2)')
+		
+	;str_yr = '2021'
+	;str_yr2 = '2021'
+	;str_jd = '190'
+	;str_jd2 = '189'
+	;str_mn = '07'
+	;str_mn2 = '07'
+	
+;;;	lmd_fn = buoy_data_dir + str_yr + '/' + str_mn + '/g' + str_yr + str_jd + '00.lmd'
+;;;	lmd_fn2 = buoy_data_dir + str_yr2 + '/' + str_mn2 + '/g' + str_yr2 + str_jd2 + '00.lmd'
+;print, lmd_fn
+;print, lmd_fn2
+;;;	b_data = get_buoy_sst_r_c(station_fn, buoy_list, mask_fn, lmd_fn )
+;;;b_data2 = get_buoy_sst_r_c(station_fn, buoy_list, mask_fn, lmd_fn2 )
+	
+;;;	b_sst = get_buoy_sst_increse( b_data, b_data2, water)  ; over water  arr of buoy sst increase
+
+	;b_sst_arr = b_data.b_loc_sst
+	;b_col_arr = b_data.b_loc_col
+	;b_row_arr = b_data.b_loc_row	
+	;print, b_data.b_loc_sst, b_data2.b_loc_sst
+	
+    ;ind = where(b_sst gt -100)
+
+   ;..............................
+
+   ; Run analysis for specified years and days
+
+   for yra=yrstart,yrend do begin
+      jd1=1
+      if(yra eq yrstart) then jd1=jdstart 
+      jd2=365
+      if(yra mod 4 eq 0) then jd2=366
+      if(yra eq yrend) then jd2=jdend
+  
+      for jda=jd1,jd2 do begin              ; each day, eg. from jd 11 to jd 21
+
+         ; Calculate time differences from noon on target day
+
+         j1=julday(1,1,yra)-julday(1,1,yrstart)+jda-0.5   
+         dt=j0-j1
+
+		; get buoy data
+
+        if ( (jda gt 90) and (jda lt 330) ) then begin
+         	o_jd = julday(1,0,yra)
+            caldat, o_jd+jda, m1, d1, yr1
+
+            str_mn = string(m1,format='(i2.2)')
+
+            o_jd2 = julday(1,0,yra)
+            jda2 = jda - 1
+            caldat, o_jd2+jda2, m2, d2, yr2
+
+            str_mn2 = string(m2,format='(i2.2)')
+            
+            str_jd = string(jda,format='(i3.3)')
+            str_jd2 = string(jda2,format='(i3.3)')    ; the day before str_jd
+
+            lmd_fn = buoy_data_dir + str_yr + '/' + str_mn + '/g' + str_yr + str_jd + '00.lmd'
+            lmd_fn2 = buoy_data_dir + str_yr + '/' + str_mn2 + '/g' + str_yr + str_jd2 + '00.lmd'
+            print, lmd_fn, ' songzhi'
+            print, lmd_fn2
+            b_data = get_buoy_sst_r_c(station_fn, buoy_list, mask_fn, lmd_fn )
+            b_data2 = get_buoy_sst_r_c(station_fn, buoy_list, mask_fn, lmd_fn2 )
+
+            b_sst = get_buoy_sst_increse( b_data, b_data2, water)  ; over water  arr of buoy sst increase
+        endif
+
+         ; Select files from time window
+
+         kf=where(abs(dt) le dtmax,nkf)
+
+         ;---------------------------------------
+         ; special test for backward only:
+         ;  kf=where(dt ge -dtmax and dt le 0.,nkf)
+         ;---------------------------------------
+  
+         dt=dt(kf)
+         jd=jd0(kf)
+         hr=hr0(kf)
+         fn=fns(kf)
+         fb=fbs(kf)
+
+         t = fltarr(nwater,nkf)     ; for sst
+         d = fltarr(nwater,nkf)     ; for dtime
+
+         ; get images and apply cloud masks
+
+         for i=0,nkf-1 do begin
+
+            ; Obtain next image name
+
+            img0 = intarr(1024,1024)
+            img  = fltarr(1024,1024)
+            img(*,*) = -1.0
+
+            dtime = lonarr(1024,1024)
+
+            pack = get_img(fn(i))
+;print, yra, jda, i, fn(i)
+            ; swap bytes on Intel architecture machines
+            ;  byteorder,img
+
+            img0 = pack.sst_arr
+            img0(where(img0 eq pack.sst_miss_v)) = -1
+
+            offset = 27315
+            sst_scale = 0.01
+            ;img = (pack.sst_arr(where(pack.sst_arr ne pack.sst_miss_v)) + offset ) * scale - 273.15
+            ;( img(where(img ne -1)) + offset ) * scale - 273.15
+            img(where (img0 ne -1)) = (img0(where (img0 ne -1)) + 27315 ) * sst_scale - 273.15
+
+;            img=0.01*rotate(img,7)
+ ;           img(land)=-1
+            dtime0 = pack.dtime_arr
+            dtime0(where(dtime0 eq pack.dtime_miss_v)) = -1
+           
+            dtime_scale = 0.25
+            ; after time scale, convert second to jd
+            dtime(where (dtime0 ne -1)) = dtime0(where (dtime0 ne -1)) * dtime_scale / (24.*60.*60.)
+
+  
+            ; Look for isolated pixels in open water (nghbr = 9)
+
+            npix=bytarr(1024,1024)
+            for ix=-1,1 do begin
+               for jx=-1,1 do begin 
+                  img2=shift(img,ix,jx)
+                  k=where(img2 gt 0,nk)
+                 if(nk gt 0) then npix(k)=npix(k)+1
+               end
+            end
+            k=where(npix le 1 and nghbr eq 9 and img gt 0,nk)
+            if (nk gt 0) then   img(k) = -1
+            
+     
+            ; Check for unreasonable values
+
+            k = where(img lt 0 or img gt 40.,nk)
+            if (nk gt 0) then begin
+               img(k)=-1
+               dtime(k) = -1
+            endif
+
+            ; Store sst in 1-d array
+  
+            t(*,i) = img(water)
+            d(*,i) = dtime(water)
+         end  ; for i
+
+         ; create today's image
+ 
+         ; set up projected values from yesterday
+  
+         imgb=fltarr(1024,1024)-1
+         ;;;imgb(water) = a2 + lakeavg1(lake) - lakeavg2(lake)
+		 
+		 avg_inc = lakeavg1(lake) - lakeavg2(lake)
+		 
+        imgb_k = -1    ; init for no buoy's season 
+        if ( (jda gt 90) and (jda lt 330) ) then begin
+                            
+            b_ind = where(b_sst gt -100)    ; buoy sst
+            s_ind = where(b_sst eq -100)    ; avg satellite sst
+		 
+            if ( b_ind(0) gt 0 ) then begin            ; not empty arr
+                a2(b_ind) = a2(b_ind) + b_sst(b_ind)
+
+                a2(s_ind) = a2(s_ind) + avg_inc(s_ind)
+                ;imgb(water) = a2
+
+                imgb_k = water_k_2_arr_k( water, b_ind, 1024)         ; convert index of b_ind to index of 1024 array
+            
+            endif else begin
+                a2 = a2 + avg_inc    ; no buoy data
+            endelse
+            
+        endif else begin
+            a2 = a2 + avg_inc    ; outoff buoy' season
+        endelse
+       
+
+        imgb(water) = a2
+
+         ; scan available images & weight in space and time
+
+         img=fltarr(1024,1024)
+         avg=fltarr(1024,1024)
+         wgt=fltarr(1024,1024)
+         wt =fltarr(1024,1024)
+        
+
+         for i=0,nkf-1 do begin
+;            wt=dtfac/(dtfac+dt(i)*dt(i)/dtmax2)
+            img(water) = t(*,i)
+
+            dt_sum = dt(i) + d(*,i)
+            wt(water) = dtfac / (dtfac + dt_sum * dt_sum / dtmax2)
+            for ix=-rmax,rmax do begin
+               for jx=-rmax,rmax do begin
+                  wr=rfac/(rfac+(ix*ix+jx*jx)/rmax2)
+                  img2 = shift(img,ix,jx)
+                  wt2 = shift(wt,ix,jx)
+                  ; pixel with valid data
+
+                  k = where(img2 gt 0 and lmask le 100,nk)
+                  if (nk gt 0) then begin
+              ;       avg(k)=avg(k)+wr*wt*img2(k)
+                     
+                     avg(k) = avg(k) + wr * wt2(k) * img2(k)
+                     wgt(k) = wgt(k) + wr * wt2(k)
+                  end
+               end
+            end
+         end
+
+         ; calculate interpolated values
+
+         k = where(wgt gt 0,nk1)
+         if(nk1 gt 0) then avg(k)=avg(k)/wgt(k)
+
+         ; if there are no new sst data within +/- dtmax in time and
+         ;  +/- rmax in space, use projected value from yesterday
+
+         k = where(wgt le 0 and lmask le 100,nk3)
+         
+         if (nk3 gt 0) then begin
+            avg(k) = imgb(k)
+            print, "use prejected file from yesterday", nk3
+            ;print,'imgb(k) = ', imgb(k)
+            m_k = match_k(imgb_k, k)
+            if ( m_k[0] ne -1 ) then begin            
+              print, 'match k = ', m_k
+            endif
+         endif
+   
+
+         ; smooth boundary areas with 9-point smoother at edges between
+         ;  areas with new interpolated sst data and areas with no new sst data
+
+         tt=fltarr(1024,1024)
+         np1=bytarr(1024,1024)
+         for ix=-1,1 do begin
+            for jx=-1,1 do begin 
+               img2=shift(avg,ix,jx)
+               tt=tt+img2
+               img2=shift(wgt,ix,jx)
+               ; count surrounding interpolated pixels
+               k=where(nghbr eq 9 and img2 gt 0,nk)
+               if(nk gt 0) then np1(k)=np1(k)+1
+            end
+         end
+  
+         ;  print, np1
+         k=where(np1 gt 0 and np1 lt 9,nk2)
+         if(nk2 gt 0) then avg(k)=tt(k)/9.
+
+         ; check for negative temp
+
+         a = avg(water)
+         k=where(a lt 0,nk)
+         if(nk gt 0) then a(k)=0
+
+         ; create png image and save ascii data values
+
+         img=img*0+255
+         img(water)=a*256/30.
+         tv,img
+       
+         y_m_d = get_year_month_day( yra, jda)
+   
+         str_yr = string(yra,format='(i4)')
+         str_jd = string(jda,format='(i3.3)')
+
+         xyouts,0.02,0.23,'YR:' + str_yr + ' JD:' + str_jd,/norm,color=0
+         img=tvrd()
+         img=img(*,110:909)
+         fn = glsea_dir + '/' + str_yr + '_' + str_jd + '_glsea_c.png'
+         write_png,fn,img,red,grn,blu
+         fn = glsea_dir + '/' + str_yr + '_' + str_jd + '_glsea.dat'
+         openw,1,fn
+         printf,1, round(a*100)/100., format='(f5.2)'      ; from d.ddd to d.dd
+
+         close,1
+         
+         ncepetagl_fn = glsea_dir + '/ncepetagl' + y_m_d + '.dat'
+         glsea_png_fn = glsea_dir + '/' + str_yr + '_' + str_jd + '_glsea.png'
+         glsea_asc_fn = glsea_dir + '/' + str_yr + '_' + str_jd + '_glsea.asc'
+         glsea_i_fn   = glsea_dir + '/' + str_yr + '_' + str_jd + '_glsea_i.dat'
+
+         asc_arr = fltarr(1024,1024)
+         asc_arr(*,*) = 255.0
+         asc_arr(water) = round(a * 100 ) /100.   ; from d.ddd to d.dd
+
+         raw_ice = bytarr(1024,1024)              ; need for both ice season and non ice season
+
+          ; calculate lakewide averages
+
+            for l=0,5 do begin
+               lakeavg2(l)=lakeavg1(l)
+               k=where(lake eq l)
+               lakeavg1(l)=mean(a(k))
+            end            
+ 
+         if ( jda le end_ice or jda ge begin_ice) then begin                   ; ice season
+             
+            ice_fn = get_ice_fn( ice_dir, yra, jda)
+            ;raw_ice = bytarr(1024,1024)
+                                
+            if ( strlen(ice_fn) ne 0 ) then begin
+               get_raw_ice, ice_fn, nb_fn, lmask, raw_ice     ; raw_ice will have same shoreline as lmask
+               asc_fill_ice, raw_ice, asc_arr               
+ 
+               lakeavg1 = agv_with_ice( raw_ice, lmask,  a )
+            end  
+            
+            mk_glsea_i_dat, glsea_i_fn, asc_arr, water             
+            mk_glsea_asc, glsea_asc_fn, asc_arr
+;            mk_ncep_data, ncepetagl_fn, ncep_fn, ch_ncep_fn,  lmask, raw_ice, a, 1
+      
+      
+            mk_glsea_png, glsea_png_fn, ice_fn, w_bk_fn, c_pal_fn, lmask, raw_ice, a, nk1, 1
+
+         endif else begin                                                      ; non ice season
+ ;           mk_ncep_data, ncepetagl_fn, ncep_fn, ch_ncep_fn,  lmask, raw_ice, a, 0
+            mk_glsea_asc, glsea_asc_fn, asc_arr
+            mk_glsea_png, glsea_png_fn, ice_fn, s_bk_fn, c_pal_fn, lmask, raw_ice, a, nk1, 0    ; in summer raw_ice is array of 0
+;;;;;;;
+
+         endelse
+ 
+         ; output stats file:
+         ;  nkf = number of sst files used in interpolation
+         ;  nk1 = number of pixels filled with interpolated sst data
+         ;  nk2 = number of pixels which were smoothed at edges between interpolated and projected values
+         ;  nk3 = number of pixels filled with projected sst data
+         ;
+         ;  lakeavg1(0) = lake average sst for Lake Superior
+         ;  lakeavg1(1) = lake average sst for Lake Michigan
+         ;  lakeavg1(2) = lake average sst for Lake Huron
+         ;  lakeavg1(3) = lake average sst for Lake St. Clair
+         ;  lakeavg1(4) = lake average sst for Lake Erie
+         ;  lakeavg1(5) = lake average sst for Lake Ontario
+   
+         print,yra,jda,nkf,nk1,nk2,nk3,lakeavg1,format='(6i8,6f7.2)'
+         printf,2,yra,jda,nkf,nk1,nk2,nk3,lakeavg1,format='(6i8,6f7.2)'
+         a2 = a
+
+      end  ; for jda
+   end     ; for yra
+
+end

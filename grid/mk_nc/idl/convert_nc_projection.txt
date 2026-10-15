@@ -1,0 +1,30 @@
+# show layer 2 in the nc file
+ gdalinfo -sd '2' 2008_029_glsea.nc
+
+# from x-y to lat-lon
+$ gdalwarp -of netCDF test_glsea.nc test_glsea2.nc -s_srs EPSG:3395  -t_srs EPSG:4326
+
+# from x-y to lat-lon for one layer (Temperature)
+$ gdalwarp -of netCDF NETCDF:"2008_029_glsea.nc":Temperature 2008_029_glsea3.nc  -s_srs EPSG:3395  -t_srs EPSG:4326
+
+
+ gdalwarp -of netCDF NETCDF:"2008_029_glsea.nc":Temperature 2008_029_glsea_a.nc  -s_srs EPSG:3395  -t_srs EPSG:4326
+
+gdalwarp -of netCDF NETCDF:"2008_029_glsea.nc":Ice_Concentration 2008_029_glsea_b.nc  -s_srs EPSG:3395  -t_srs EPSG:4326
+
+# from x-y to lat-lon for two layer
+$ gdalwarp -of netCDF NETCDF:"2008_029_glsea.nc":Temperature NETCDF:"2008_029_glsea.nc":Ice_Concentration 2008_029_glsea33.nc  -s_srs EPSG:3395  -t_srs EPSG:4326
+
+gdalwarp -of netCDF NETCDF:"2008_029_glsea.nc":Temperature NETCDF:"2008_029_glsea.nc":Ice_Concentration 2008_029_glsea33.nc  -s_srs EPSG:3395  -t_srs EPSG:4326 
+
+
+ 
+$ gdal_translate -of netCDF -sds 2008_029_glsea.nc 2008_029_glsea33.nc
+
+$ gdalwarp -of netCDF 2008_029_glsea33_1.nc 2008_029_glsea33_11.nc   -s_srs EPSG:3395  -t_srs EPSG:4326 
+
+# from x-y to lat-lon for layer Temperature, keep -99999 as missing_value in new file
+$ gdalwarp -of netCDF NETCDF:"2008_029_glsea.nc":Temperature 2008_029_glsea_aa.nc -srcnodata -99999 -dstnodata -99999   -s_srs EPSG:3395  -t_srs EPSG:4326 -overwrite
+
+$fn=2008_029_glsea.nc
+$ gdalwarp -of netCDF NETCDF:"$fn":Temperature 2008_029_glsea_aa.nc  -srcnodata -99999 -dstnodata -99999  -s_srs EPSG:3395  -t_srs EPSG:4326 -overwrite

@@ -1,0 +1,264 @@
+
+;--------------------------------------------------------------------------
+
+function get_ice_concentration, raw_ice
+
+   sicode  = ['10','20','30','40','50','60','70','80','90','91','92','93',     $
+              '01','02','12','13','24','35','45','46','57','68','79','89','81',$
+              '11','22','23','33','34','44','55','56','66','67','77','78','88']
+
+                                                   ; GLSEA ice color index
+
+   clridx  = [ 12,  14,  16,  18,  20,  22,  24,  26,  28,  29,  30,  30,      $
+               11,  12,  13,  14,  16,  18,  19,  20,  22,  24,  26,  27,  28, $
+               12,  14,  15,  16,  17,  18,  20,  21,  22,  23,  24,  25,  26]
+
+;-----------------------------------------------------------------------------------
+;  Color               Median Ice                  Color               Median Ice
+;  index    SI Code   Concentration                index    SI Code    Concentration
+;-----------------------------------------------------------------------------------
+;   11          01          5                       24    68,70,77         70
+;   -------------------------
+;   12    02,10,11         10                       25          78         75
+;                                                   26    79,80,88         80
+;   13       12,15         15                       27          89         85
+;                                                   -------------------------
+;   14    13,20,22         20                       28       81,90         90
+;   15          23         25                       29          91         95
+;   16    24,30,33         30                       -------------------------
+;   17          34         35                       30       92,93        100
+;   -------------------------
+;   18    35,40,44         40
+;   19          45         45                     11-12  Off-white
+;   20    46,50,55         50                     13-17  Light gray
+;   21          56         55                     18-23  Medium gray
+;   22    57,60,66         60                     24-29  Dark gray
+;   23          67         65                     30-30  Black
+;-----------------------------------------------------------------------------------
+
+   asc_arr = bytarr(1024,1024)
+
+   ice_index = where( (raw_ice ne 255) and (raw_ice ne 0) )  ; 0 = water,  255 = land (in lce file it is -1)
+   
+   c_01 = where(raw_ice eq 1, c_num)
+   if (c_num ne 0 ) then asc_arr( c_01 ) = 5 
+      
+   c_02 = where(raw_ice eq 2, c_num)
+   if (c_num ne 0 ) then asc_arr( c_02 ) = 10
+   
+   c_10 = where(raw_ice eq 10, c_num)
+   if (c_num ne 0 ) then asc_arr( c_10 ) = 10
+    
+   c_11 = where(raw_ice eq 11, c_num)
+   if (c_num ne 0 ) then asc_arr( c_11 ) = 10
+         
+   c_12 = where(raw_ice eq 12, c_num)
+   if (c_num ne 0 ) then asc_arr( c_12 ) = 15
+    
+   c_15 = where(raw_ice eq 15, c_num)
+   if (c_num ne 0 ) then asc_arr( c_15 ) = 15     
+   
+   c_13 = where(raw_ice eq 13, c_num)
+   if (c_num ne 0 ) then asc_arr( c_13 ) = 20
+   
+   c_20 = where(raw_ice eq 20, c_num)
+   if (c_num ne 0 ) then asc_arr( c_20 ) = 20
+    
+   c_22 = where(raw_ice eq 22, c_num)
+   if (c_num ne 0 ) then asc_arr( c_22 ) = 20   
+  
+   c_23 = where(raw_ice eq 23, c_num)
+   if (c_num ne 0 ) then asc_arr( c_23 ) = 25   
+    
+   c_24 = where(raw_ice eq 24, c_num)
+   if (c_num ne 0 ) then asc_arr( c_24 ) = 30 
+   
+   c_30 = where(raw_ice eq 30, c_num)
+   if (c_num ne 0 ) then asc_arr( c_30 ) = 30
+    
+   c_33 = where(raw_ice eq 33, c_num)
+   if (c_num ne 0 ) then asc_arr( c_33 ) = 30   
+   
+   c_34 = where(raw_ice eq 34, c_num)
+   if (c_num ne 0 ) then asc_arr( c_34 ) = 35  
+    
+   c_35 = where(raw_ice eq 35, c_num)
+   if (c_num ne 0 ) then asc_arr( c_35 ) = 40
+   
+   c_40 = where(raw_ice eq 40, c_num)
+   if (c_num ne 0 ) then asc_arr( c_40 ) = 40
+    
+   c_44= where(raw_ice eq 44, c_num)
+   if (c_num ne 0 ) then asc_arr( c_44 ) = 40   
+ 
+   c_45= where(raw_ice eq 45, c_num)
+   if (c_num ne 0 ) then asc_arr( c_45 ) = 45   
+  
+   c_46 = where(raw_ice eq 46, c_num)
+   if (c_num ne 0 ) then asc_arr( c_46 ) = 50
+   
+   c_50 = where(raw_ice eq 50, c_num)
+   if (c_num ne 0 ) then asc_arr( c_50 ) = 50
+    
+   c_55= where(raw_ice eq 55, c_num)
+   if (c_num ne 0 ) then asc_arr( c_55 ) = 50
+      
+   c_56= where(raw_ice eq 56, c_num)
+   if (c_num ne 0 ) then asc_arr( c_56 ) = 55      
+   
+   c_57 = where(raw_ice eq 57, c_num)
+   if (c_num ne 0 ) then asc_arr( c_57 ) = 60
+   
+   c_60 = where(raw_ice eq 60, c_num)
+   if (c_num ne 0 ) then asc_arr( c_60 ) = 60
+    
+   c_66= where(raw_ice eq 66, c_num)
+   if (c_num ne 0 ) then asc_arr( c_66 ) = 60
+  
+   c_67= where(raw_ice eq 67, c_num)
+   if (c_num ne 0 ) then asc_arr( c_67 ) = 65
+  
+   c_68 = where(raw_ice eq 68, c_num)
+   if (c_num ne 0 ) then asc_arr( c_68 ) = 70
+   
+   c_70 = where(raw_ice eq 70, c_num)
+   if (c_num ne 0 ) then asc_arr( c_70 ) = 70
+    
+   c_77= where(raw_ice eq 77, c_num)
+   if (c_num ne 0 ) then asc_arr( c_77 ) = 70
+ 
+   c_78= where(raw_ice eq 78, c_num)
+   if (c_num ne 0 ) then asc_arr( c_78 ) = 75
+ 
+   c_79 = where(raw_ice eq 79, c_num)
+   if (c_num ne 0 ) then asc_arr( c_79 ) = 80
+   
+   c_80 = where(raw_ice eq 80, c_num)
+   if (c_num ne 0 ) then asc_arr( c_80 ) = 80
+    
+   c_88= where(raw_ice eq 88, c_num)
+   if (c_num ne 0 ) then asc_arr( c_88 ) = 80
+
+   c_89= where(raw_ice eq 89, c_num)
+   if (c_num ne 0 ) then asc_arr( c_89 ) = 85 
+  
+   c_81 = where(raw_ice eq 81, c_num)
+   if (c_num ne 0 ) then asc_arr( c_81 ) = 90
+   
+   c_90 = where(raw_ice eq 90, c_num)
+   if (c_num ne 0 ) then asc_arr( c_90 ) = 90        
+    
+   c_91= where(raw_ice eq 91, c_num)
+   if (c_num ne 0 ) then asc_arr( c_91 ) = 95
+
+   c_92= where(raw_ice eq 92, c_num)
+   if (c_num ne 0 ) then asc_arr( c_92 ) = 100
+  
+   c_93= where(raw_ice eq 93, c_num)
+   if (c_num ne 0 ) then asc_arr( c_93 ) = 100
+       
+   return, asc_arr
+end
+
+;-----------------------------------------------------------------------------------
+;-----------------------------------------------------------------------------------
+
+pro get_raw_ice, ice_fn, nb_fn, land_mask, raw_ice
+
+   land = where(land_mask ge 100)
+
+   openr, lun, ice_fn, /get_lun
+
+   name       = ' '       
+   date       = ' '
+   ncols      = ' '
+   nrows      = ' '
+   xllcorner  = ' ' 
+   yllcorner  = ' ' 
+   cellsize   = ' '    
+   NODATA_value = ' '  
+ 
+   readf,lun, name, date, ncols,nrows,xllcorner,yllcorner,cellsize,NODATA_value 
+   readf,lun,raw_ice
+   raw_ice = rotate(temporary(raw_ice),7)
+
+   openr, lun, nb_fn, /get_lun
+
+   line = ' '
+   readf, lun, line, line, line,line, line, line
+
+   while not eof(lun) do begin
+      readf, lun, line
+           ; print, line
+      o_col = 0
+      o_row = 0
+      red = 0
+      n_col = 0
+      n_row = 0
+      blue = 0
+      flag = 0
+   
+      reads, line, o_col, o_row, red, n_col, n_row, blue, flag 
+   
+           ;print, o_col, o_row, red, n_col, n_row, blue, flag 
+      raw_ice(o_col, o_row) = raw_ice(n_col, n_row) 
+   end
+   
+   free_lun, lun
+   
+   raw_ice(land) = -1.0    ; change ice to land (cw is land, nic is ice)
+
+   return
+end
+
+ 
+;-----------------------------------------------------------------------------------
+
+work_dir = '/home/cw/opr/glsea2/idl/test/'
+ice_fn = '/home/cw/test/ice/2018/10/g201830300.lce'
+dat_fn = '/mnt/cwdata/p/m/lcb/2018/11/2018_305_glsea.dat'
+
+
+
+   mask_dir = '/home/cw/masks/1024/'
+   mask_fn  = mask_dir + 'cwglsyrd.byt'
+
+   print,format='(1x,a)','Reading over-water mask file . . .'
+   lmask  = bytarr(1024,1024)
+   openr,lunm,mask_fn,/get_lun
+   readu,lunm,lmask
+ 
+   close,lunm
+   free_lun,lunm
+
+   raw_ice = bytarr(1024,1024)
+
+   openr, lun,  ice_fn, /get_lun
+
+   name       = ' '
+   date       = ' '
+   ncols      = ' '
+   nrows      = ' '
+   xllcorner  = ' '
+   yllcorner  = ' '
+   cellsize   = ' '
+   NODATA_value = ' '
+
+   readf,lun, name, date, ncols,nrows,xllcorner,yllcorner,cellsize,NODATA_value
+   readf,lun,raw_ice
+
+  
+   free_lun, lun
+
+   ice_arr = get_ice_concentration( raw_ice )
+  
+   diff_index( (where(lmask ne 255) and (where(ice_arr e
+
+  ; window, xs=1024,ys=1024
+  ; tv, rotate(ice_arr,7)
+
+ ;  write_png, 'my.png', rotate(ice_arr,7)
+
+   
+  
+end

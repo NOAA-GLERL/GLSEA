@@ -1,0 +1,7 @@
+ 
+# gcc  mkgeotif.c -g -I/usr/include  -I/usr/include/libgeotiff  -L/usr/lib64 -L/home/cw/util/Gctpc -ltiff -lgeotiff -lgeo -lm #
+
+#gcc  mk_glsea_geotif.c -o  mk_glsea_geotif.exe -I/usr/include  -I/usr/include/libgeotiff  -L/usr/lib64 -L/home/cw/util/Gctpc -ltiff -lgeotiff -lgeo -lm #
+                              
+gcc  mk_glsea_geotif.c -g -o  mk_glsea_geotif.exe -I/usr/include  -I/usr/include/libgeotiff  -L/usr/lib64 -L/home/cw/util/Gctpc -ltiff -lgeotiff -lgeo -lm #
+                              

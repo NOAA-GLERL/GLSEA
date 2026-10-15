@@ -1,0 +1,127 @@
+##!/bin/bash
+# filename:  mk_glsea_nc.sh
+
+PATH=/usr/share/centrifydc/bin:$PATH
+
+workDir='/home/cw/opr/glsea3_b/mk_nc/'
+dataDir='/mnt/cwdata/p/m/lcd/'
+iceDir='/mnt/cwdata/p/s/lic/'
+outDir="${workDir}output/"
+webDir=''
+
+
+yr4='2024'
+
+mn_list=`ls ${dataDir}/${yr4} `
+
+echo ${mn_list}
+
+for mn in ${mn_list[@]}; do
+   fn_list=`ls ${dataDir}${yr4}/${mn} | grep _glsea.asc`
+
+ for fn in ${fn_list[@]}; do
+   echo $fn
+   pathFn=${dataDir}${yr4}/${mn}/${fn}
+
+   ncFn=${fn%.*}.nc            # no path
+   ncSstFn=${fn%.*}_sst.nc
+   ncIceFn=${fn%.*}_ice.nc
+
+   tmpNcFn=${fn%.*}$$.nc
+
+   echo $ncFn
+   ncPathFn=${dataDir}${yr4}/${mn}/${fn%.*}.nc
+   echo $ncPathFn
+
+   export WORK_DIR=${workDir}
+   export ASC_FN=${pathFn}
+
+    /usr/local/bin/idl -quiet -rt=${workDir}idl/mk_glsea_xy_nc.sav
+
+    if [[ -f ${outDir}${ncFn} ]]; then
+
+# for SST
+         echo ${outDir}${ncFn}
+        
+         /usr/bin/gdalwarp -of netCDF NETCDF:"${outDir}${ncFn}":Temperature  ${outDir}${ncSstFn}  -srcnodata -99999 -dstnodata -99999  -s_srs EPSG:3395  -t_srs EPSG:4326 -overwrite
+
+         epoch_seconds_str=( $( ncdump ${outDir}${ncFn} | grep "time =" | tail -1 ) )
+         epoch_seconds=${epoch_seconds_str[2]}      # get 1551398400 from "time = 1551398400 ;"
+
+         title="SST from Great Lakes Surface Environmental Analysis (GLSEA)"
+         long_name="Temperature"
+         standard_name="sea_water_temperature"
+
+         ncrename -v Band1,sst ${outDir}${ncSstFn}  # change variable name from Band1 to sst
+         
+         # add time variale
+         ncap2 -h -s 'defdim("time",1)' \
+                  -s "time[time]=${epoch_seconds}" \
+                  -s 'time@long_name="Time"' \
+                  -s 'time@standard_name="time"' \
+		  -s 'time@units="seconds since 1970-01-01T00:00:00Z"' \
+                  -s 'time@calendar="Gregorian"' \
+	          -s 'time@axis="T"' \
+                  -s "time@bounds=\"$epoch_seconds, $epoch_seconds\""  -O ${outDir}${ncSstFn} ${outDir}${tmpNcFn}
+
+          ncatted -h -O -a title,global,a,c,"${title}" \
+                  -O -a source,global,a,c,"${fn}" \
+                  -O -a long_name,sst,m,c,"${long_name}" \
+                  -O -a standard_name,sst,a,c,"${standard_name}"  ${outDir}${tmpNcFn} ${outDir}${tmpNcFn}$$.nc
+
+
+           # add time to sst
+          ncdump ${outDir}${tmpNcFn}$$.nc  | sed -e 's/float sst(lat, lon)/float sst(time, lat, lon)/' > ${outDir}${tmpNcFn}.cdl
+
+          ncgen3 -o ${outDir}${ncSstFn}  ${outDir}${tmpNcFn}.cdl
+
+          rm ${outDir}${tmpNcFn}.cdl ${outDir}${tmpNcFn} ${outDir}${tmpNcFn}$$.nc
+            
+          echo "move ${outDir}${ncSstFn}  to ${dataDir}${yr4}/${mn}"
+          mv ${outDir}${ncSstFn}  ${dataDir}${yr4}/${mn}
+            #mv ${outDir}${ncFn} ${dataDir}
+## for ice
+###### uncomment under line for make ice fiel
+          if [[ $mn != '07' ]] && [[ $mn != '08' ]] && [[ $mn != '09' ]] && [[ $mn != '10' ]]; then
+         #  if [[ 1 != 1 ]]; then              # remove this line if need to make ice nc fles
+
+            /usr/bin/gdalwarp -of netCDF NETCDF:"${outDir}${ncFn}":Ice_Concentration  ${outDir}${ncIceFn} -srcnodata -99999 -dstnodata -99999  -s_srs EPSG:3395  -t_srs EPSG:4326 -overwrite
+
+            title="Ice Concentration from Great Lakes Surface Environmental Analysis (GLSEA) and NIC"
+            long_name="Ice Concentration"
+            standard_name="Ice_Concentration"
+
+            ncrename -v Band1,ice_concentration ${outDir}${ncIceFn}  # change variable name from Band1 to ice_concentration
+
+            # add time variale
+            ncap2 -h -s 'defdim("time",1)' \
+                  -s "time[time]=${epoch_seconds}" \
+                  -s 'time@long_name="Time"' \
+                  -s 'time@standard_name="time"' \
+                  -s 'time@units="seconds since 1970-01-01T00:00:00Z"' \
+                  -s 'time@calendar="Gregorian"' \
+	          -s 'time@axis="T"' \
+                  -s "time@bounds=\"$epoch_seconds, $epoch_seconds\""  -O ${outDir}${ncIceFn} ${outDir}${tmpNcFn}
+
+            ncatted -h -O -a title,global,a,c,"${title}" \
+                    -O -a source,global,a,c,"${fn}" \
+                    -O -a long_name,ice_concentration,m,c,"${long_name}" \
+                    -O -a standard_name,ice_concentration,a,c,"${standard_name}"  ${outDir}${tmpNcFn} ${outDir}${tmpNcFn}$$.nc
+
+           # add time to ice_concentration
+            ncdump ${outDir}${tmpNcFn}$$.nc  | sed -e 's/float ice_concentration(lat, lon)/float ice_concentration(time, lat, lon)/'  > ${outDir}${tmpNcFn}.cdl
+
+            ncgen3 -o ${outDir}${ncIceFn}  ${outDir}${tmpNcFn}.cdl
+
+            rm ${outDir}${tmpNcFn}.cdl ${outDir}${tmpNcFn}  ${outDir}${tmpNcFn}$$.nc
+           
+            echo "move ${outDir}${ncIceFn}  to ${iceDir}${yr4}/${mn}"
+            mv ${outDir}${ncIceFn}  ${iceDir}${yr4}/${mn}
+           # mv ${outDir}${ncFn} ${dataDir}
+         fi   
+         
+         mv ${outDir}${ncFn} ${dataDir}${yr4}/${mn}/ 
+   fi
+ 
+ done
+done

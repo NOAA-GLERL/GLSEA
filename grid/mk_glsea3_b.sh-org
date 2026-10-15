@@ -1,0 +1,355 @@
+#!/bin/bash 
+
+# run  mk_sst_list.sh, glsea3.pro
+
+date
+echo "$0 ..."
+
+PATH=/usr/share/centrifydc/bin:$PATH
+
+work_dir='/home/cw/opr/glsea3_b/'
+idl_dir="${work_dir}idl/"
+in_data_dir="${work_dir}output"
+
+ftp_dir='/mnt/cwdata/ftp-export/glsea/'
+#ncep_fn="${ftp_dir}ncepetagl.dat"
+
+out_data_dir='/mnt/cwdata/p/m/lcd/'
+out_data_t_dir='/mnt/cwdata/p/m/lcdt/'
+
+web_data_dir='/mnt/cwdata/web-export/glsea/cur/'
+
+cwwebWebDir='cw@cwweb:/var/www/html/'
+cwwebWebImgDir="${cwwebWebDir}glsea/cur/"
+
+cwwebFtpDir='cw@cwweb:/mnt/cwdata/ftp/glsea/'
+#cwwebFtpDir="${cwwebWebDir}ftp/glsea/"
+cwwebNcep_fn="${cwwebFtpDir}ncepetagl.dat"
+
+web_dir='cw@cwweb:/mnt/cwdata/p/m/'
+web_data_dir="${web_dir}lcd/"
+web_data_t_dir="${web_dir}lcdt/"
+
+ice_dir='/mnt/cwata/p/s/lic/'
+
+fn_list_fn="${work_dir}fn_list"
+glsea_in="${work_dir}glsea.in"
+stats_in="${in_data_dir}/stats.in"
+stats_out="${in_data_dir}/stats.out"
+stats_in_copy="${in_data_dir}/stats.in.copy"
+
+season_fn="${work_dir}season.cfg"
+
+#@ begin_ice = 325
+#@ end_ice   = 151
+
+begin_ice=`cat ${season_fn} | head -1 | awk '{print $3}' `
+end_ice=`cat ${season_fn} | tail -1 | awk '{print $3}' `
+
+export BEGIN_ICE=$begin_ice
+export END_ICE=$end_ice
+
+/bin/bash ${work_dir}mk_sst_list.sh
+
+
+if [[ -f $glsea_in ]] && [[ -f $fn_list_fn ]]; then
+   
+   /usr/local/bin/idl -quiet -rt=${idl_dir}glsea3_b.sav     # 2> /dev/null
+fi
+
+log_stamp=`date +"%Y-%m-%d-%H-%M"`.log
+cp ${stats_in} ${in_data_dir}/${log_stamp}
+
+cp ${stats_in} ${stats_in_copy}
+mv ${stats_out} ${stats_in}     
+
+data_stamp=`cat $glsea_in`
+echo $data_stamp
+ 
+ago10_yr=`echo $data_stamp | head -1 | cut -c1-4`  
+ago10_jd=`echo $data_stamp | head -1 | cut -c6-8`	# ago10_jd is 10 day ago
+cur_yr=`echo $data_stamp | head -1 | cut -c10-13`
+cur_jd=`echo $data_stamp | head -1 | cut -c15-17`       # cur_jd is today
+
+
+echo $ago10_yr $ago10_jd
+echo $cur_yr $cur_jd
+
+asc_fn="${in_data_dir}/${ago10_yr}_${ago10_jd}_glsea.asc"
+dat_fn="${in_data_dir}/${ago10_yr}_${ago10_jd}_glsea.dat"
+dat_i_fn="${in_data_dir}/${ago10_yr}_${ago10_jd}_glsea_i.dat"
+png_fn="${in_data_dir}/${ago10_yr}_${ago10_jd}_glsea.png"
+t_png_fn="${in_data_dir}/t_${ago10_yr}_${ago10_jd}_glsea.png"
+png_c_fn="${in_data_dir}/${ago10_yr}_${ago10_jd}_glsea_c.png"
+
+#echo $dat_fn
+
+asc_cur_fn="${in_data_dir}/${cur_yr}_${cur_jd}_glsea.asc"
+dat_cur_fn="${in_data_dir}/${cur_yr}_${cur_jd}_glsea.dat"
+dat_i_cur_fn="${in_data_dir}/${cur_yr}_${cur_jd}_glsea_i.dat"
+png_cur_fn="${in_data_dir}/${cur_yr}_${cur_jd}_glsea.png"
+t_png_cur_fn="${in_data_dir}/t_${cur_yr}_${cur_jd}_glsea.png"
+png_c_cur_fn="${in_data_dir}/${cur_yr}_${cur_jd}_glsea_c.png"
+
+cur_yymmdd="`date -d "01/01/${cur_yr} +${cur_jd} days -1 day" +%Y%m%d `"	 # 2013/05
+echo $cur_yymmdd
+ncep_cur_fn="${in_data_dir}/ncepetagl${cur_yymmdd}.dat"
+
+if [[ -f ${dat_fn} ]]; then
+       
+   cur_yymm="`date -d "01/01/${cur_yr} +${cur_jd} days -1 day" +%Y/%m `"	 # 2013/05
+   cur_mm="`date -d "01/01/${cur_yr} +${cur_jd} days -1 day" +%m`" 	         # 05
+      #echo "aaa $cur_yymm $cur_mm "
+   ago10_yymm="`date -d "01/01/${ago10_yr} +${ago10_jd} days -1 day" +%Y/%m `"     # 2013/05
+   ago10_mm="`date -d "01/01/${ago10_yr} +${ago10_jd} days -1 day" +%m`"	    # 05
+      #echo "aaa $ago10_yymm $ago10_mm "
+
+   if ! [[ -d ${out_data_dir}${ago10_yr} ]]; then
+      echo "Create fodler ${out_data_dir}${ago10_yr}"
+      mkdir ${out_data_dir}${ago10_yr}
+   fi
+  
+   if ! [[ -d ${out_data_dir}${ago10_yymm} ]]; then
+      echo "Create fodler ${out_data_dir}${ago10_yymm}"
+      mkdir ${out_data_dir}${ago10_yymm}
+
+      echo "rsync -r ${out_data_dir}${ago10_yr} ${web_data_dir}"
+      rsync -r ${out_data_dir}${ago10_yr} ${web_data_dir}
+
+   fi
+
+   if ! [[ -d ${out_data_t_dir}${ago10_yr} ]]; then
+      echo "Make ${out_data_t_dir}${ago10_yr} ..."
+      mkdir ${out_data_t_dir}${ago10_yr}
+
+   fi
+
+   if ! [[ -d ${out_data_t_dir}${ago10_yymm} ]]; then
+      echo "Make  ${out_data_t_dir}${ago10_yymm} ..."
+      mkdir  ${out_data_t_dir}${ago10_yymm}
+
+      echo "rsync -r ${out_data_t_dir}${ago10_yr} ${web_data_t_dir}"
+      rsync -r ${out_data_t_dir}${ago10_yr} ${web_data_t_dir}
+
+   fi
+
+   echo "Copy $dat_fn to ${out_data_dir}${ago10_yr}/${ago10_mm}"  
+   cp $dat_fn ${out_data_dir}${ago10_yr}/${ago10_mm}
+   rsync $dat_fn ${web_data_dir}${ago10_yr}/${ago10_mm}
+
+   cp ${stats_in} ${stats_in_copy}
+
+   if [[ -f $asc_fn ]]; then
+       echo "Move $asc_fn to ${out_data_dir}${ago10_yr}/${ago10_mm}"
+       rsync $asc_fn ${web_data_dir}${ago10_yr}/${ago10_mm}
+       mv $asc_fn ${out_data_dir}${ago10_yr}/${ago10_mm}
+   fi
+
+   if [[ -f $png_fn ]]; then
+
+     /usr/bin/convert -resize 125 ${png_fn} ${t_png_fn}
+     
+     if [[ -f ${t_png_fn} ]]; then
+        rsync $t_png_fn ${web_data_t_dir}${ago10_yr}/${ago10_mm}
+        mv $t_png_fn ${out_data_t_dir}${ago10_yr}/${ago10_mm}
+     fi
+
+     echo "Move $png_fn to ${out_data_dir}${ago10_yr}/${ago10_mm}"
+     rsync $png_fn ${web_data_dir}${ago10_yr}/${ago10_mm}
+     mv $png_fn ${out_data_dir}${ago10_yr}/${ago10_mm}
+   fi
+
+#   if [[ -f $png_c_fn ]]; then
+#      echo "Move $png_c_fn to ${out_data_dir}${ago10_yr}/${ago10_mm}"
+#      mv $png_c_fn ${out_data_dir}${ago10_yr}/${ago10_mm}
+#   fi
+
+   if [[ -f $dat_i_fn ]]; then
+      echo "Move $dat_i_fn to ${out_data_dir}${ago10_yr}/${ago10_mm}"
+      rsync $dat_i_fn ${web_data_dir}${ago10_yr}/${ago10_mm}
+      mv $dat_i_fn ${out_data_dir}${ago10_yr}/${ago10_mm}      
+   fi
+
+fi  # ( -e $dat_fn )
+
+# echo $dat_cur_fn 
+
+if [[ -e $dat_cur_fn ]]; then
+
+   if ! [[ -e ${out_data_dir}${cur_yr} ]]; then
+      echo "Create folder ${out_data_dir}${cur_yr}"
+      mkdir ${out_data_dir}${cur_yr}
+   fi
+
+   if ! [[ -e ${out_data_dir}${cur_yr}/${cur_mm} ]]; then
+     echo "Create fodler ${out_data_dir}${cur_yr}/${cur_mm}"
+     mkdir ${out_data_dir}${cur_yr}/${cur_mm}
+
+     echo "rsync -r ${out_data_dir}${cur_yr} ${web_data_dir}"
+     rsync -r ${out_data_dir}${cur_yr} ${web_data_dir}
+   fi
+
+   if ! [[ -d ${out_data_t_dir}${cur_yr} ]]; then
+      echo "Make ${out_data_t_dir}${cur_yr} ..."
+      mkdir ${out_data_t_dir}${cur_yr}
+
+   fi
+
+   if ! [[ -d ${out_data_t_dir}${cur_yymm} ]]; then
+      echo "Make  ${out_data_t_dir}${cur_yymm} ..."
+      mkdir  ${out_data_t_dir}${cur_yymm}
+
+      echo "rsync -r ${out_data_t_dir}${cur_yr} ${web_data_t_dir}"
+      rsync -r ${out_data_t_dir}${cur_yr} ${web_data_t_dir}
+
+   fi
+
+   echo "Move $dat_cur_fn to ${out_data_dir}${cur_yr}/${cur_mm}"
+   rsync $dat_cur_fn ${web_data_dir}${cur_yr}/${cur_mm}
+   mv $dat_cur_fn ${out_data_dir}${cur_yr}/${cur_mm}
+
+ ###  if [[ -e ${web_data_dir}glsea_cur.dat ]]; then
+ ###     rm ${web_data_dir}glsea_cur.dat
+ ###  fi
+ ###  ln -s ${out_data_dir}${cur_yr}/${cur_mm}/${dat_cur_fn##*/} ${web_data_dir}glsea_cur.dat
+   
+ ###  echo "rsync -L  ${web_data_dir}glsea_cur.dat to ${cwwebWebImgDir}"  
+ ###  rsync -L  ${web_data_dir}glsea_cur.dat ${cwwebWebImgDir}
+
+   if [[ -e $asc_cur_fn ]]; then
+      echo "Move $asc_cur_fn to ${out_data_dir}${cur_yr}/${cur_mm}"
+      rsync $asc_cur_fn ${web_data_dir}${cur_yr}/${cur_mm}
+      mv $asc_cur_fn ${out_data_dir}${cur_yr}/${cur_mm}
+   
+ ###     if [[ -e ${web_data_dir}glsea_cur.asc ]]; then
+ ###        rm ${web_data_dir}glsea_cur.asc
+ ###     fi
+ ###     ln -s ${out_data_dir}${cur_yr}/${cur_mm}/${asc_cur_fn##*/} ${web_data_dir}glsea_cur.asc
+  
+###      echo "rsync -L  ${web_data_dir}glsea_cur.asc to ${cwwebWebImgDir}"  
+###      rsync -L  ${web_data_dir}glsea_cur.asc ${cwwebWebImgDir}
+
+   fi  
+
+   if [[ -e $png_cur_fn ]]; then      
+      /usr/bin/convert -resize 125 ${png_cur_fn} ${t_png_cur_fn}
+
+      if [[ -f ${t_png_cur_fn} ]]; then
+        rsync $t_png_cur_fn ${web_data_t_dir}${cur_yr}/${cur_mm}
+        mv $t_png_cur_fn ${out_data_t_dir}${cur_yr}/${cur_mm}
+      fi
+
+      echo "Move $png_cur_fn to ${out_data_dir}${cur_yr}/${cur_mm}"
+      rsync $png_cur_fn ${web_data_dir}${cur_yr}/${cur_mm}
+      mv $png_cur_fn ${out_data_dir}${cur_yr}/${cur_mm}
+   
+ ###     if [[ -e ${web_data_dir}glsea_cur.png ]]; then
+ ###       rm ${web_data_dir}glsea_cur.png
+ ###     fi
+###      ln -s ${out_data_dir}${cur_yr}/${cur_mm}/${png_cur_fn##*/} ${web_data_dir}glsea_cur.png
+
+ ###     echo "rsync -L  ${web_data_dir}glsea_cur.dat to ${cwwebWebImgDir}"  
+###      rsync -L  ${web_data_dir}glsea_cur.png ${cwwebWebImgDir}
+
+   fi  
+
+ #  if [[ -e $png_c_cur_fn ]]; then
+ #     echo "Move $png_c_cur_fn to ${out_data_dir}${cur_yr}/${cur_mm}"
+ #     mv $png_c_cur_fn ${out_data_dir}${cur_yr}/${cur_mm}
+      
+ ###     if [[ -e ${web_data_dir}glsea_cur_c.png ]]; then
+ ###       rm ${web_data_dir}glsea_cur_c.png
+ ###     fi
+ ###     ln -s ${out_data_dir}${cur_yr}/${cur_mm}/${png_c_cur_fn##*/} ${web_data_dir}glsea_cur_c.png
+  
+ ###     echo "rsync -L  ${web_data_dir}glsea_cur_c.png to ${cwwebWebImgDir}"  
+ ###     rsync -L  ${web_data_dir}glsea_cur_c.png ${cwwebWebImgDir}
+
+ #  fi  
+
+   if [[ -e $dat_i_cur_fn ]]; then   
+      echo "Move $dat_i_cur_fn to${out_data_dir}${cur_yr}/${cur_mm}"
+      rsync $dat_i_cur_fn ${web_data_dir}${cur_yr}/${cur_mm}
+      mv $dat_i_cur_fn ${out_data_dir}${cur_yr}/${cur_mm}     
+   fi
+fi
+
+###echo ${ncep_cur_fn} 
+###echo ${ncep_fn}
+
+###if [[ -e ${ncep_cur_fn} ]]; then
+###   echo "Copy ${ncep_cur_fn} to ${ncep_fn}"
+###   cp ${ncep_cur_fn}  ${ncep_fn}
+
+###   echo "rsync ${ncep_fn} to ${cwwebFtpDir}"
+###   rsync  ${ncep_fn} ${cwwebFtpDir}
+
+###fi
+
+
+jd=`echo $ago10_jd + 1 | bc`   # or @ jd = `echo $ago10_jd 1 | awk '{print $1 + $2}'`
+yr=$ago10_yr
+
+last_jd=`echo $ago10_jd + 11 | bc`
+last_yr=$ago10_yr
+
+echo $jd $yr $last_jd $last_yr
+
+if [[ $(( $yr % 4 )) -eq 0 ]]; then            # no space between $((   ))
+   if [[ $jd -gt 366 ]]; then
+      jd=1
+      yr=$(($yr + 1))                          # or yr=$((yr + 1))
+   fi
+else
+   if [[ $jd -gt 365 ]]; then
+      jd=1
+      yr=$(($yr + 1))
+   fi  
+fi
+
+if [[ $jd -lt 10 ]]; then
+    ago10_jd="00$jd"
+elif [[ $jd -lt 100 ]]; then
+    ago10_jd="0$jd"
+else
+   ago10_jd=$jd
+fi
+
+ago10_yr=$yr
+
+if [[ $(( $last_yr % 4 )) -eq 0 ]]; then
+   if [[ $last_jd -gt 366 ]]; then
+      last_jd=$(( $last_jd - 366 ))
+      last_yr=$(( last_yr + 1 ))
+   fi
+else
+   if [[ $last_jd -gt 365 ]]; then
+      last_jd=$(( $last_jd - 365 ))
+      last_yr=$(( $last_yr + 1 ))
+   fi
+fi
+
+if [[ $last_jd -lt 10 ]]; then
+   str_jd="00$last_jd"
+elif [[ $last_jd -lt 100 ]]; then
+   str_jd="0$last_jd"
+else
+   str_jd=$last_jd
+fi
+str_yr=$last_yr
+
+echo $ago10_yr $ago10_jd   >  $glsea_in
+echo $str_yr $str_jd       >> $glsea_in    
+echo $fn_list_fn           >> $glsea_in
+echo $in_data_dir          >> $glsea_in
+
+/bin/bash ${work_dir}mk_glsea-temps.sh
+
+##/bin/bash  /home/cw/opr/glsea3/mk_geotif.sh 1>> /home/cw/opr/glsea2/logs/mk_geotif.log 2>&1
+
+##/bin/bash /home/cw/opr/glsea_kmz/mk_glsea_kml.sh  1>> /home/cw/opr/glsea_kmz/logs/mk_glsea_kml.log  2>&1
+
+/bin/bash  /home/cw/opr/glsea3_b/mk_nc/mk_glsea_nc.sh  1>> /home/cw/opr/glsea3_b/mk_nc/logs/mk_glsea_nc.log 2>&1
+
+cat /home/cw/opr/glsea3_b/output/stats.in | tail -1 >> /home/cw/opr/glsea3_b/stats_nrt.in
+

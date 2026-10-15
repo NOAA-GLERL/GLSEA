@@ -1,0 +1,232 @@
+#!/bin/sh
+################################################################################
+# DO NOT ALTER THIS LINE
+VERSION=17
+################################################################################
+
+SERVER=re.ssec.wisc.edu:80
+SCHEME=http
+
+CURL=`which curl 2>/dev/null`
+TIMEOUT_BIN=`which timeout 2>/dev/null`
+TIMEOUT=
+if [ -n "${TIMEOUT_BIN}" ]; then
+	TIMEOUT="${TIMEOUT_BIN} -s 9 600"
+fi
+
+showHelp() {
+	echo ""
+	echo "$0 [-hufprv] [-s server:port] file [name] [date] [time]"
+	echo ""
+	echo "   -h: Show help"
+	echo "   -u: Check for update"
+	echo ""
+	echo "   -f: Force overwrite if there is a conflict"
+	echo "   -p: Designate file as part of a larger product"
+	echo ""
+	echo "   -r: Send through head node proxy"
+	echo "   -s: Specify the server and port ([server:port] required)"
+	echo ""
+	echo "   -v: Be verbose"
+	echo ""
+	echo " file: Path to file"
+	echo "       Format: /path/to/[name]_[YYYYMMDD]_[HHMMSS].???"
+	echo ""
+	echo " name: Specify the product name"
+	echo "       Required when the file name does not contain [name]"
+	echo "       Format: Cannot contain '_'"
+	echo " date: Specify the date"
+	echo "       Required when the file name does not contain [date]"
+	echo "       Format: YYYYMMDD"
+	echo " time: Specify the time"
+	echo "       Required when the file name does not contain [time]"
+	echo "       Format: HHMMSS"
+	echo ""
+}
+
+checkUpdate() {
+	DL_URL="${SCHEME}://${SERVER}/upload/re_upload"
+	URL="$DL_URL?version=${VERSION}"
+	VERSION_CHECK=`${CURL} -s ${URL}`
+	if [ -n "${VERSION_CHECK}" ]; then
+		echo "A new version is available at:"
+		echo "    ${DL_URL}"
+		echo "Download with:"
+		echo "    ${CURL} ${DL_URL} -o $0"
+	else
+		echo "This version is up to date"
+	fi
+}
+
+# Get the options from the command line
+RE_FORCE=0
+RE_PART=0
+RE_PROXY=0
+RE_VERBOSE=0
+if [ -z "$1" ]; then
+	showHelp
+	exit 0
+fi
+while getopts hufprvs: o; do
+	case "$o" in
+	h)	showHelp
+		exit 0
+		;;
+	u)	checkUpdate
+		exit 0
+		;;
+	f)	RE_FORCE=1
+		;;
+	p)	RE_PART=1
+		;;
+	r)	RE_PROXY=1
+		;;
+	v)	RE_VERBOSE=1
+		;;
+	s)	SERVER=${OPTARG}
+		;;
+	*)	showHelp
+		exit 1
+		;;
+	esac
+done
+shift $((${OPTIND} -1))
+
+# Set our variables
+RE_FILE=$1
+RE_NAME=$2
+RE_DATE=$3
+RE_TIME=$4
+
+# Does the file exist?
+if [ ! -f "${RE_FILE}" ]; then
+	echo "ERROR: Could not find file: ${RE_FILE}"
+	exit 1
+fi
+
+# Set the defaults for sending
+RE_FILE_DIR=`dirname "${RE_FILE}"`
+RE_FILE_NAME=`basename "${RE_FILE}"`
+
+# Verify the product name
+if [ -n "${RE_NAME}" ]; then
+	match=`expr "${RE_NAME}" : '\([a-zA-Z0-9\-]\{1,\}\)'`
+	if [ "$match" != "${RE_NAME}" ]; then
+		echo ""
+		echo "ERROR: Invalid product name"
+		showHelp
+		exit 1
+	fi
+fi
+
+# Verify the product date
+if [ -n "${RE_DATE}" ]; then
+	match=`expr "${RE_DATE}" : '\([0-9]\{8\}\)'`
+	if [ "$match" != "${RE_DATE}" ]; then
+		echo ""
+		echo "ERROR: Invalid product date"
+		showHelp
+		exit 1
+	fi
+fi
+
+# Verify the product time
+if [ -n "${RE_TIME}" ]; then
+	match=`expr "${RE_TIME}" : '\([0-9]\{6\}\)'`
+	if [ "$match" != "${RE_TIME}" ]; then
+		echo ""
+		echo "ERROR: Invalid product time"
+		showHelp
+		exit 1
+	fi
+fi
+
+# Set scheme to https if port = 443
+PORT=`echo ${SERVER} |awk -F: '{print $2}'`
+if [ "${PORT}" = "443" ]; then
+	SCHEME=https
+fi
+
+# Get the direct upload name (unless -r was specified)
+if [ ${RE_PROXY} -eq 0 ]; then
+	SERVER_DIRECT=
+	if [ -n "${RE_NAME}" ]; then
+		SERVER_DIRECT=`${CURL} -s ${SCHEME}://${SERVER}/upload/re_upload?name=${RE_NAME}`
+	else
+		SERVER_DIRECT=`${CURL} -s ${SCHEME}://${SERVER}/upload/re_upload?file=${RE_FILE_NAME}`
+	fi
+	if [ -n "${SERVER_DIRECT}" ]; then
+		SERVER=${SERVER_DIRECT}
+	else
+		if [ ${RE_VERBOSE} -ne 0 ]; then
+			echo "WARNING: Could not determine the head node URL for proxy upload"
+		fi
+	fi
+fi
+
+# Change to the dir with the file
+cd "${RE_FILE_DIR}"
+echo "Connecting to ${SERVER}..."
+
+# Check if the server is ready to receive the file
+if [ ${RE_VERBOSE} -ne 0 ]; then
+	echo "Checking upload availability"
+fi
+BYTES=`/bin/ls -Lln "${RE_FILE_NAME}" |awk '{print $5}'`
+COMMAND="${CURL} -s ${SCHEME}://${SERVER}/upload/re_upload?bytes=${BYTES}"
+SUCCESS=`${COMMAND} -o - 2>/dev/null |head -1`
+if [ "${SUCCESS}" -eq "${SUCCESS}" ] 2>/dev/null; then
+	if [ "${SUCCESS}" = "-1" ]; then
+		echo "  Server cannot accept the file, it is too large!"
+		exit 3
+	fi
+	while [ "${SUCCESS}" != "1" ]; do
+		echo "  Server cannot accept the file at this time, trying again in 15 seconds..."
+		sleep 15
+		SUCCESS=`${COMMAND} -o - |head -1`
+	done
+else
+	if [ ${RE_VERBOSE} -ne 0 ]; then
+		echo "  Server does not understand file size check, continuing..."
+	fi
+fi
+
+# Send the file
+echo "Sending ${RE_FILE_NAME}"
+COMMAND="${TIMEOUT} ${CURL} --max-time 600 -s ${SCHEME}://${SERVER}/upload/ -F file=@${RE_FILE_NAME}"
+if [ -n "${RE_NAME}" ]; then
+	COMMAND="${COMMAND} -F name=${RE_NAME}"
+fi
+if [ -n "${RE_DATE}" ]; then
+	COMMAND="${COMMAND} -F date=${RE_DATE}"
+fi
+if [ -n "${RE_TIME}" ]; then
+	COMMAND="${COMMAND} -F time=${RE_TIME}"
+fi
+if [ ${RE_PART} -ne 0 ]; then
+	COMMAND="${COMMAND} -F part=1"
+fi
+if [ ${RE_FORCE} -ne 0 ]; then
+	COMMAND="${COMMAND} -F force=1"
+fi
+
+# Retry a few times...
+RETRIES=3
+${COMMAND}
+LASTEXIT=$?
+while [ ${LASTEXIT} -ne 0 -a ${RETRIES} -gt 0 ]; do
+	echo "Curl command failed: ${LASTEXIT}"
+	SLEEP=$((${RANDOM} * 30 / 32767))
+	echo "Sleeping for ${SLEEP} seconds..."
+	sleep ${SLEEP}
+	echo "Trying again..."
+	${COMMAND}
+	LASTEXIT=$?
+	RETRIES=$((${RETRIES} - 1))
+done
+if [ ${LASTEXIT} -eq 0 ]; then
+	echo "Done"
+else
+	echo "Giving up"
+fi
+exit ${LASTEXIT}

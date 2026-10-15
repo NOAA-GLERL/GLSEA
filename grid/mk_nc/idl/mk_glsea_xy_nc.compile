@@ -1,0 +1,4 @@
+.compile mk_glsea_xy_nc.pro
+resolve_all
+save,/routines,filename='mk_glsea_xy_nc.sav'
+exit

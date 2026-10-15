@@ -1,0 +1,5 @@
+cwrender --enhance='sst' --size='full' /mnt/cwdata/o/i/rhd/2019/01/2019_031_2137_n19_gr.hdf 2019_031_2137_n19_gr.tif
+
+gdal_translate -of netCDF 2019_031_2137_n19_gr.tif 2019_031_2137_n19_gr.nc
+
+

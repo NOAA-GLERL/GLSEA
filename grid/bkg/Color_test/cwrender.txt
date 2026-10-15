@@ -1,0 +1,2 @@
+cwrender --enhance=sst --range=0/30 --units=Celsius --palette=HSL256 --format=png 2019_336_1517_m01_gr.hdf 2019_336_hsl256.png
+
