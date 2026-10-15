@@ -17,16 +17,7 @@ Algorithm for GLSEA:
 
 ---
 #### Description of GLSEA GRIDDED product code
-below are just examples, I have no idea how this works! ;) so feel free to change
 
-- glsea3_b.pro:   Main processing script: The main program to make the GLSEA files.
-	input directories: 
-	output directories:
-	step 1: calls readascii.pro?
-	step 2: modify something?
-	step 3: 
-	step 4: 
-	step 5:
 
 - readascii.pro: Reads ASCII data into array.
 - ch_ice_fn.pro: checking the ice file
@@ -34,13 +25,6 @@ below are just examples, I have no idea how this works! ;) so feel free to chang
 - get_buoy_and_glsea_sst.pro: the program to get bouy and sst data.
 - get_cloud.pro: the program to get cloud information
 - glsea3_b.pro: the mail program to make glsea files.
-
-# delete below files
-- pp.pro: testing code
-- t2.pro: testing code
-- test.pro: testing code
-- t.pro: testing code
-
 
 
 - mk_acspo_glsea-temps.sh: the main script to make the acspo glsea-temps file.
@@ -57,5 +41,11 @@ below are just examples, I have no idea how this works! ;) so feel free to chang
 - run.sh: manully run code.
 
 
+- [ ] we need to indicate the _order_ in which things run.  The above descriptions are helpful but it's not clear what script runs first and calls which other script. [@Songzhi]
+
 ---
 #### Description of GLSEA STATISTICS code
+[coming soon]
+- [ ] @James will add analysis scripts 
+
+My thought is that since this is really the analysis of the GLSEA product (lake-wide averages, mins, maxes, etc.) this should be handled by the GreatLakes node and not CW central.
